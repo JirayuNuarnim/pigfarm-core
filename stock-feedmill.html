@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>คลังโรงงานอาหาร - THE CORE</title>
+<link rel="stylesheet" href="shared/style.css">
+</head>
+<body data-page="stock">
+<div class="layout">
+  <nav id="nav-root" class="sidebar no-print"></nav>
+  <main class="content">
+    <div class="page-header">
+      <div>
+        <p style="margin:0;"><a class="link" href="stock.html">&larr; เลือกคลังอื่น</a></p>
+        <h1>คลังโรงงานอาหาร</h1>
+        <p class="subtitle">โรงงานปากท่อ · เก็บรายละเอียดบริษัท / วันหมดอายุ / ราคาต่อล็อต</p>
+      </div>
+      <button class="btn" id="new-item-btn" style="display:none;">+ เพิ่มวัตถุดิบใหม่</button>
+    </div>
+
+    <div class="stat-grid">
+      <div class="stat-card"><div class="num" id="stat-value">-</div><div class="label">มูลค่าคงเหลือรวม (บาท)</div></div>
+      <div class="stat-card"><div class="num" id="stat-items">-</div><div class="label">รายการวัตถุดิบ</div></div>
+      <div class="stat-card"><div class="num" id="stat-expiring">-</div><div class="label">ใกล้หมดอายุ (ภายใน 90 วัน)</div></div>
+      <div class="stat-card"><div class="num" id="stat-locks">-</div><div class="label">ล็อคสั่งล่วงหน้าที่ยังเปิด</div></div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px;">
+      <input type="text" id="q" placeholder="ค้นหาชื่อวัตถุดิบ" style="max-width:320px;">
+    </div>
+
+    <table>
+      <thead><tr><th>วัตถุดิบ</th><th>คงเหลือรวม</th><th>มูลค่า (บาท)</th><th>จำนวนล็อต</th><th>วันหมดอายุใกล้สุด</th><th></th></tr></thead>
+      <tbody id="item-rows"><tr><td colspan="6" class="muted">กำลังโหลด...</td></tr></tbody>
+    </table>
+
+    <div id="new-item-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.4); align-items:center; justify-content:center;">
+      <div class="card" style="width:380px;">
+        <h2 style="margin-top:0;">เพิ่มวัตถุดิบใหม่</h2>
+        <form id="new-item-form">
+          <div class="field"><label>ชื่อวัตถุดิบ</label><input type="text" id="ni-name" required></div>
+          <div class="field"><label>หน่วยนับ</label><input type="text" id="ni-unit" value="กก."></div>
+          <button class="btn" type="submit">บันทึก</button>
+          <button class="btn secondary" type="button" id="ni-cancel">ยกเลิก</button>
+        </form>
+      </div>
+    </div>
+  </main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="shared/supabase-client.js"></script>
+<script src="shared/auth-guard.js"></script>
+<script>
+function fmtDate(d) {
+  if (!d) return "-";
+  const dt = new Date(d + "T00:00:00");
+  return dt.toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" });
+}
+function daysUntil(d) {
+  if (!d) return Infinity;
+  return Math.round((new Date(d + "T00:00:00") - new Date()) / 86400000);
+}
+
+let ALL_ITEMS = [];
+
+async function loadSummary() {
+  const { data, error } = await sb.from("ops_feedmill_summary").select("*").order("name");
+  if (error) { document.getElementById("item-rows").innerHTML = `<tr><td colspan="6" class="muted">โหลดไม่สำเร็จ: ${escapeHtml(error.message)}</td></tr>`; return; }
+  ALL_ITEMS = data || [];
+
+  const totalValue = ALL_ITEMS.reduce((s, r) => s + Number(r.total_value), 0);
+  document.getElementById("stat-value").textContent = formatNumber(totalValue, 0);
+  document.getElementById("stat-items").textContent = ALL_ITEMS.length;
+  document.getElementById("stat-expiring").textContent = ALL_ITEMS.filter(r => { const d = daysUntil(r.nearest_expiry); return d >= 0 && d <= 90; }).length;
+
+  const { count: lockCount } = await sb.from("ops_order_locks").select("*", { count: "exact", head: true }).eq("status", "เปิด");
+  document.getElementById("stat-locks").textContent = lockCount ?? 0;
+
+  renderRows();
+}
+
+function renderRows() {
+  const q = document.getElementById("q").value.trim();
+  const rows = ALL_ITEMS.filter(r => !q || r.name.includes(q));
+  const tbody = document.getElementById("item-rows");
+  if (!rows.length) { tbody.innerHTML = `<tr><td colspan="6" class="muted">ไม่พบวัตถุดิบ</td></tr>`; return; }
+  tbody.innerHTML = rows.map(r => {
+    const d = daysUntil(r.nearest_expiry);
+    let expBadge = "";
+    if (r.nearest_expiry && d >= 0 && d <= 90) expBadge = ' <span class="badge warn">ใกล้หมดอายุ</span>';
+    else if (r.nearest_expiry && d < 0) expBadge = ' <span class="badge danger">หมดอายุแล้ว</span>';
+    return `<tr>
+      <td>${escapeHtml(r.name)}</td>
+      <td class="text-right">${formatNumber(r.total_qty, 0)} ${escapeHtml(r.unit)}</td>
+      <td class="text-right">${formatNumber(r.total_value, 0)}</td>
+      <td class="text-right">${r.lot_count}</td>
+      <td>${fmtDate(r.nearest_expiry)}${expBadge}</td>
+      <td><a class="link" href="stock-feedmill-item.html?item=${r.item_id}">ดูล็อต / จัดการ</a></td>
+    </tr>`;
+  }).join("");
+}
+
+(async () => {
+  const user = await requireAuth();
+  if (!user) return;
+  await loadSummary();
+  document.getElementById("q").addEventListener("input", renderRows);
+
+  if (isOwner() || isCentral()) document.getElementById("new-item-btn").style.display = "";
+  document.getElementById("new-item-btn").addEventListener("click", () => document.getElementById("new-item-modal").style.display = "flex");
+  document.getElementById("ni-cancel").addEventListener("click", () => document.getElementById("new-item-modal").style.display = "none");
+  document.getElementById("new-item-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const { error } = await sb.from("ops_items").insert({
+      domain: "feedmill",
+      name: document.getElementById("ni-name").value.trim(),
+      unit: document.getElementById("ni-unit").value.trim() || "กก.",
+    });
+    if (error) { alert("บันทึกไม่สำเร็จ: " + error.message); return; }
+    document.getElementById("new-item-modal").style.display = "none";
+    document.getElementById("new-item-form").reset();
+    loadSummary();
+  });
+})();
+</script>
+</body>
+</html>

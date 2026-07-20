@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>รายละเอียดวัตถุดิบ - THE CORE</title>
+<link rel="stylesheet" href="shared/style.css">
+</head>
+<body data-page="stock">
+<div class="layout">
+  <nav id="nav-root" class="sidebar no-print"></nav>
+  <main class="content">
+    <div class="page-header">
+      <div>
+        <p style="margin:0;"><a class="link" href="stock-feedmill.html">&larr; กลับคลังโรงงานอาหาร</a></p>
+        <h1 id="item-name">-</h1>
+        <p class="subtitle" id="item-meta"></p>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>ล็อตคงเหลือ (แยกตามบริษัท / วันหมดอายุ)</h2>
+      <table>
+        <thead><tr><th>บริษัท</th><th>คงเหลือ</th><th>ราคา/หน่วย</th><th>มูลค่า</th><th>วันหมดอายุ</th><th>หมายเหตุ</th><th class="admin-col"></th></tr></thead>
+        <tbody id="lot-rows"><tr><td colspan="7" class="muted">กำลังโหลด...</td></tr></tbody>
+      </table>
+      <div id="add-lot-area" style="display:none; margin-top:14px;">
+        <h3 style="margin-bottom:8px;">+ เพิ่มล็อตใหม่</h3>
+        <form id="lot-form" class="row" style="flex-wrap:wrap; align-items:end; gap:10px;">
+          <div class="field" style="margin:0;"><label>บริษัท</label><input type="text" id="lot-supplier"></div>
+          <div class="field" style="margin:0;"><label>จำนวน</label><input type="number" step="0.01" id="lot-qty" required></div>
+          <div class="field" style="margin:0;"><label>ราคา/หน่วย</label><input type="number" step="0.01" id="lot-price" value="0"></div>
+          <div class="field" style="margin:0;"><label>วันหมดอายุ</label><input type="date" id="lot-expiry"></div>
+          <div class="field" style="margin:0;"><label>หมายเหตุ</label><input type="text" id="lot-note"></div>
+          <div class="field" style="margin:0;"><button class="btn" type="submit">เพิ่ม</button></div>
+        </form>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>ล็อคสั่งล่วงหน้า (สั่งไว้ → ส่งแล้ว / คงเหลือ)</h2>
+      <table>
+        <thead><tr><th>วันที่ล็อค</th><th>บริษัท</th><th>จำนวนล็อค</th><th>ราคา</th><th>ส่งแล้ว</th><th>คงเหลือ</th><th>สถานะ</th><th class="admin-col"></th></tr></thead>
+        <tbody id="lock-rows"><tr><td colspan="8" class="muted">กำลังโหลด...</td></tr></tbody>
+      </table>
+      <div id="add-lock-area" style="display:none; margin-top:14px;">
+        <h3 style="margin-bottom:8px;">+ เพิ่มล็อคใหม่</h3>
+        <form id="lock-form" class="row" style="flex-wrap:wrap; align-items:end; gap:10px;">
+          <div class="field" style="margin:0;"><label>วันที่ล็อค</label><input type="date" id="lk-date"></div>
+          <div class="field" style="margin:0;"><label>บริษัท</label><input type="text" id="lk-supplier"></div>
+          <div class="field" style="margin:0;"><label>จำนวนล็อค</label><input type="number" step="0.01" id="lk-qty" required></div>
+          <div class="field" style="margin:0;"><label>หน่วย</label><input type="text" id="lk-unit" value="กก." style="width:70px;"></div>
+          <div class="field" style="margin:0;"><label>ราคา</label><input type="number" step="0.01" id="lk-price" value="0"></div>
+          <div class="field" style="margin:0;"><label>ส่งแล้ว</label><input type="number" step="0.01" id="lk-sent" value="0"></div>
+          <div class="field" style="margin:0;"><button class="btn" type="submit">เพิ่ม</button></div>
+        </form>
+      </div>
+    </div>
+  </main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="shared/supabase-client.js"></script>
+<script src="shared/auth-guard.js"></script>
+<script>
+const params = new URLSearchParams(window.location.search);
+const itemId = params.get("item");
+let CAN_EDIT = false;
+
+function fmtDate(d) {
+  if (!d) return "-";
+  return new Date(d + "T00:00:00").toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" });
+}
+function daysUntil(d) {
+  if (!d) return Infinity;
+  return Math.round((new Date(d + "T00:00:00") - new Date()) / 86400000);
+}
+
+async function loadLots() {
+  const { data } = await sb.from("ops_lots").select("*").eq("item_id", itemId).order("expiry_date", { nullsFirst: false });
+  const tbody = document.getElementById("lot-rows");
+  if (!data || !data.length) { tbody.innerHTML = `<tr><td colspan="7" class="muted">ยังไม่มีล็อต</td></tr>`; return; }
+  tbody.innerHTML = data.map(l => {
+    const d = daysUntil(l.expiry_date);
+    let badge = "";
+    if (l.expiry_date && d >= 0 && d <= 90) badge = ' <span class="badge warn">ใกล้หมดอายุ</span>';
+    else if (l.expiry_date && d < 0) badge = ' <span class="badge danger">หมดอายุแล้ว</span>';
+    return `<tr>
+      <td>${escapeHtml(l.supplier || "-")}</td>
+      <td class="text-right">${formatNumber(l.qty, 0)} ${escapeHtml(l.unit)}</td>
+      <td class="text-right">${formatNumber(l.unit_price)}</td>
+      <td class="text-right">${formatNumber(l.qty * l.unit_price, 0)}</td>
+      <td>${fmtDate(l.expiry_date)}${badge}</td>
+      <td>${escapeHtml(l.note || "")}</td>
+      ${CAN_EDIT ? `<td><button class="btn danger small" onclick="delLot(${l.id})">ลบ</button></td>` : '<td></td>'}
+    </tr>`;
+  }).join("");
+}
+
+async function loadLocks() {
+  const { data } = await sb.from("ops_order_locks").select("*").eq("item_id", itemId).order("lock_date", { nullsFirst: false });
+  const tbody = document.getElementById("lock-rows");
+  if (!data || !data.length) { tbody.innerHTML = `<tr><td colspan="8" class="muted">ยังไม่มีล็อค</td></tr>`; return; }
+  tbody.innerHTML = data.map(k => {
+    const remaining = Number(k.lock_qty) - Number(k.sent_qty);
+    return `<tr>
+      <td>${fmtDate(k.lock_date)}</td>
+      <td>${escapeHtml(k.supplier || "-")}</td>
+      <td class="text-right">${formatNumber(k.lock_qty, 0)} ${escapeHtml(k.unit)}</td>
+      <td class="text-right">${formatNumber(k.unit_price)}</td>
+      <td class="text-right">${CAN_EDIT ? `<input type="number" step="0.01" value="${k.sent_qty}" style="width:80px;" onchange="updateSent(${k.id}, this.value, ${k.lock_qty})">` : formatNumber(k.sent_qty, 0)}</td>
+      <td class="text-right">${formatNumber(remaining, 0)}</td>
+      <td><span class="badge ${k.status === 'เปิด' ? 'warn' : 'ok'}">${escapeHtml(k.status)}</span></td>
+      ${CAN_EDIT ? `<td><button class="btn danger small" onclick="delLock(${k.id})">ลบ</button></td>` : '<td></td>'}
+    </tr>`;
+  }).join("");
+}
+
+async function updateSent(lockId, sent, lockQty) {
+  const sentNum = parseFloat(sent) || 0;
+  const status = (Number(lockQty) - sentNum) <= 0 ? "ปิด" : "เปิด";
+  await sb.from("ops_order_locks").update({ sent_qty: sentNum, status, updated_at: new Date().toISOString() }).eq("id", lockId);
+  loadLocks();
+}
+async function delLot(id) { if (confirm("ลบล็อตนี้?")) { await sb.from("ops_lots").delete().eq("id", id); loadLots(); } }
+async function delLock(id) { if (confirm("ลบล็อคนี้?")) { await sb.from("ops_order_locks").delete().eq("id", id); loadLocks(); } }
+
+(async () => {
+  const user = await requireAuth();
+  if (!user) return;
+  CAN_EDIT = isOwner() || isCentral() || myDomains().includes("feedmill");
+
+  const { data: item } = await sb.from("ops_items").select("*").eq("id", itemId).single();
+  if (!item) { document.getElementById("item-name").textContent = "ไม่พบวัตถุดิบ"; return; }
+  document.getElementById("item-name").textContent = item.name;
+  document.getElementById("item-meta").textContent = `คลังโรงงานอาหาร · โรงงานปากท่อ · หน่วย ${item.unit}`;
+
+  if (CAN_EDIT) {
+    document.getElementById("add-lot-area").style.display = "block";
+    document.getElementById("add-lock-area").style.display = "block";
+  }
+  document.querySelectorAll(".admin-col").forEach(el => { if (!CAN_EDIT) el.style.display = "none"; });
+
+  await loadLots();
+  await loadLocks();
+
+  document.getElementById("lot-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const { error } = await sb.from("ops_lots").insert({
+      item_id: itemId, location: "โรงงานปากท่อ",
+      supplier: document.getElementById("lot-supplier").value.trim(),
+      qty: parseFloat(document.getElementById("lot-qty").value) || 0,
+      unit: item.unit,
+      unit_price: parseFloat(document.getElementById("lot-price").value) || 0,
+      expiry_date: document.getElementById("lot-expiry").value || null,
+      note: document.getElementById("lot-note").value.trim(),
+      created_by: user.user_id,
+    });
+    if (error) { alert("บันทึกไม่สำเร็จ: " + error.message); return; }
+    document.getElementById("lot-form").reset();
+    loadLots();
+  });
+
+  document.getElementById("lock-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const lockQty = parseFloat(document.getElementById("lk-qty").value) || 0;
+    const sent = parseFloat(document.getElementById("lk-sent").value) || 0;
+    const { error } = await sb.from("ops_order_locks").insert({
+      item_id: itemId, location: "โรงงานปากท่อ",
+      lock_date: document.getElementById("lk-date").value || null,
+      supplier: document.getElementById("lk-supplier").value.trim(),
+      lock_qty: lockQty,
+      unit: document.getElementById("lk-unit").value.trim() || "กก.",
+      unit_price: parseFloat(document.getElementById("lk-price").value) || 0,
+      sent_qty: sent,
+      status: (lockQty - sent) <= 0 ? "ปิด" : "เปิด",
+      created_by: user.user_id,
+    });
+    if (error) { alert("บันทึกไม่สำเร็จ: " + error.message); return; }
+    document.getElementById("lock-form").reset();
+    document.getElementById("lk-unit").value = "กก.";
+    loadLocks();
+  });
+})();
+</script>
+</body>
+</html>
