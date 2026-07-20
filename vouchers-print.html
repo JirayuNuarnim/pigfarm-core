@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<title>ใบสำคัญ - THE CORE</title>
+<link rel="stylesheet" href="shared/print.css">
+</head>
+<body>
+<div class="toolbar"><button onclick="window.print()">🖨️ พิมพ์</button></div>
+<div class="print-page">
+  <div class="doc-company">บริษัท เอสเจเอฟ ฟาร์ม จำกัด</div>
+  <div class="doc-title" id="doc-title">ใบสำคัญ</div>
+  <div class="doc-meta">
+    <div id="meta-left"></div>
+    <div id="meta-right"></div>
+  </div>
+  <table class="doc-table">
+    <thead><tr><th style="width:40px;">ลำดับ</th><th>รายการ</th><th>จำนวนเงิน (บาท)</th></tr></thead>
+    <tbody id="rows"><tr><td colspan="3">กำลังโหลด...</td></tr></tbody>
+  </table>
+  <div class="doc-amount-text">จำนวนเงิน (ตัวอักษร) <span class="box" id="amount-text"></span></div>
+  <p id="note-line"></p>
+  <div class="signatures">
+    <div class="sig"><div class="line"></div><span id="sig1-label">ผู้รับเงิน</span></div>
+    <div class="sig"><div class="line"></div>ผู้จ่าย/ผู้บันทึก</div>
+    <div class="sig"><div class="line"></div>เจ้าของ (อนุมัติ)</div>
+  </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="shared/supabase-client.js"></script>
+<script src="shared/thai-baht-text.js"></script>
+<script>
+(async () => {
+  const params = new URLSearchParams(window.location.search);
+  const id = params.get("id");
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) { window.location.href = "index.html"; return; }
+
+  const { data: v } = await sb.from("ops_vouchers").select("*").eq("id", id).single();
+  if (!v) return;
+  const { data: items } = await sb.from("ops_voucher_items").select("*").eq("voucher_id", id);
+
+  document.getElementById("doc-title").textContent = "ใบสำคัญ" + v.voucher_type;
+  document.getElementById("sig1-label").textContent = v.voucher_type === "จ่ายเงิน" ? "ผู้รับเงิน" : "ผู้จ่ายเงิน";
+  document.getElementById("meta-left").innerHTML = `
+    <div>เลขที่: ${escapeHtml(v.doc_no || "#" + v.id)}</div>
+    <div>ฟาร์ม: ${escapeHtml(v.farm)}</div>
+    <div>${v.voucher_type === "จ่ายเงิน" ? "ผู้รับเงิน" : "ผู้จ่ายเงิน"}: ${escapeHtml(v.payee_name)}</div>
+  `;
+  document.getElementById("meta-right").innerHTML = `<div>วันที่: ${v.txn_date}</div>`;
+
+  const rows = (items || []).map((it, i) => `<tr><td class="num">${i+1}</td><td>${escapeHtml(it.description)}</td><td class="num">${formatNumber(it.amount)}</td></tr>`);
+  rows.push(`<tr class="doc-total-row"><td colspan="2" class="num">รวมเป็นเงิน</td><td class="num">${formatNumber(v.total_amount)}</td></tr>`);
+  document.getElementById("rows").innerHTML = rows.join("");
+  document.getElementById("amount-text").textContent = "(" + numberToThaiText(v.total_amount) + ")";
+  if (v.note) document.getElementById("note-line").textContent = "หมายเหตุ: " + v.note;
+})();
+</script>
+</body>
+</html>

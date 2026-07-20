@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>หน้าแรก - THE CORE</title>
+<link rel="stylesheet" href="shared/style.css">
+</head>
+<body data-page="dashboard">
+<div class="layout">
+  <nav id="nav-root" class="sidebar no-print"></nav>
+  <main class="content">
+    <h1>สรุปภาพรวม</h1>
+    <p class="subtitle" id="welcome-line"></p>
+
+    <div class="stat-grid">
+      <div class="stat-card"><div class="num" id="stat-items">-</div><div class="label">รายการสินค้าที่ดูแล</div></div>
+      <div class="stat-card"><div class="num" id="stat-low">-</div><div class="label">สินค้าใกล้หมด</div></div>
+      <div class="stat-card"><div class="num" id="stat-pending-pr">-</div><div class="label">ใบขอซื้อรอดำเนินการ</div></div>
+      <div class="stat-card"><div class="num" id="stat-pending-job">-</div><div class="label">ใบส่งงานช่างรอตรวจ</div></div>
+    </div>
+
+    <div class="card">
+      <h2>ใบขอซื้อล่าสุด</h2>
+      <table id="pr-table">
+        <tr><th>เลขที่</th><th>ฟาร์ม</th><th>หมวด</th><th>สถานะ</th><th></th></tr>
+        <tr><td colspan="5" class="muted">กำลังโหลด...</td></tr>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>ใบส่งงานช่างล่าสุด</h2>
+      <table id="job-table">
+        <tr><th>เลขที่</th><th>ฟาร์ม</th><th>ช่าง</th><th>สถานะ</th><th></th></tr>
+        <tr><td colspan="5" class="muted">กำลังโหลด...</td></tr>
+      </table>
+    </div>
+  </main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="shared/supabase-client.js"></script>
+<script src="shared/auth-guard.js"></script>
+<script>
+(async () => {
+  const user = await requireAuth();
+  if (!user) return;
+  document.getElementById("welcome-line").textContent = `ยินดีต้อนรับ ${user.name || user.email} · วันนี้คือ ${todayISO()}`;
+
+  const { count: itemCount } = await sb.from("ops_items").select("*", { count: "exact", head: true });
+  document.getElementById("stat-items").textContent = itemCount ?? 0;
+
+  const { count: prPending } = await sb.from("ops_purchase_requests").select("*", { count: "exact", head: true })
+    .in("status", ["รอเสมียนกลาง", "รออนุมัติเจ้าของ"]);
+  document.getElementById("stat-pending-pr").textContent = prPending ?? 0;
+
+  const { count: jobPending } = await sb.from("ops_job_submissions").select("*", { count: "exact", head: true })
+    .eq("status", "รอตรวจ");
+  document.getElementById("stat-pending-job").textContent = jobPending ?? 0;
+
+  document.getElementById("stat-low").textContent = "-";
+
+  const { data: prs } = await sb.from("ops_purchase_requests")
+    .select("id, doc_no, farm, domain, status")
+    .order("id", { ascending: false }).limit(5);
+  const prTable = document.getElementById("pr-table");
+  if (prs && prs.length) {
+    prTable.innerHTML = "<tr><th>เลขที่</th><th>ฟาร์ม</th><th>หมวด</th><th>สถานะ</th><th></th></tr>" +
+      prs.map(r => `<tr>
+        <td>${escapeHtml(r.doc_no || "#" + r.id)}</td>
+        <td>${escapeHtml(r.farm)}</td>
+        <td>${escapeHtml(DOMAIN_LABELS[r.domain] || r.domain)}</td>
+        <td><span class="badge ${STATUS_BADGE_CLASS[r.status] || ""}">${escapeHtml(r.status)}</span></td>
+        <td><a class="link" href="purchase-request.html?id=${r.id}">ดูรายละเอียด</a></td>
+      </tr>`).join("");
+  } else {
+    prTable.innerHTML = "<tr><th>เลขที่</th><th>ฟาร์ม</th><th>หมวด</th><th>สถานะ</th><th></th></tr><tr><td colspan='5' class='muted'>ยังไม่มีข้อมูล</td></tr>";
+  }
+
+  const { data: jobs } = await sb.from("ops_job_submissions")
+    .select("id, doc_no, farm, worker_name, status")
+    .order("id", { ascending: false }).limit(5);
+  const jobTable = document.getElementById("job-table");
+  if (jobs && jobs.length) {
+    jobTable.innerHTML = "<tr><th>เลขที่</th><th>ฟาร์ม</th><th>ช่าง</th><th>สถานะ</th><th></th></tr>" +
+      jobs.map(r => `<tr>
+        <td>${escapeHtml(r.doc_no || "#" + r.id)}</td>
+        <td>${escapeHtml(r.farm)}</td>
+        <td>${escapeHtml(r.worker_name)}</td>
+        <td><span class="badge ${STATUS_BADGE_CLASS[r.status] || ""}">${escapeHtml(r.status)}</span></td>
+        <td><a class="link" href="jobs.html?id=${r.id}">ดูรายละเอียด</a></td>
+      </tr>`).join("");
+  } else {
+    jobTable.innerHTML = "<tr><th>เลขที่</th><th>ฟาร์ม</th><th>ช่าง</th><th>สถานะ</th><th></th></tr><tr><td colspan='5' class='muted'>ยังไม่มีข้อมูล</td></tr>";
+  }
+})();
+</script>
+</body>
+</html>

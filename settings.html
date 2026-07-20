@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ตั้งค่า - THE CORE</title>
+<link rel="stylesheet" href="shared/style.css">
+</head>
+<body data-page="settings">
+<div class="layout">
+  <nav id="nav-root" class="sidebar no-print"></nav>
+  <main class="content">
+    <h1>ตั้งค่า / ผู้ใช้งาน</h1>
+
+    <div class="card">
+      <h2>ขั้นตอนเพิ่มผู้ใช้ใหม่ (ทำครั้งเดียวต่อคน)</h2>
+      <ol>
+        <li>ไปที่ Supabase Dashboard → Authentication → Users → กด "Add user" ใส่อีเมล+รหัสผ่านให้พนักงานคนนั้น</li>
+        <li>คัดลอก User UID ของบัญชีที่สร้าง (คอลัมน์ UID ในตารางผู้ใช้)</li>
+        <li>นำ UID มากรอกในฟอร์มด้านล่าง พร้อมกำหนดชื่อ/บทบาท/ฟาร์ม/หมวดที่ดูแล</li>
+      </ol>
+    </div>
+
+    <div class="card">
+      <h2>เพิ่ม/แก้ไขสิทธิ์ผู้ใช้</h2>
+      <form id="user-form">
+        <div class="field"><label>User UID (จาก Supabase Auth)</label><input type="text" id="u-uid" placeholder="เช่น 3fa85f64-5717-4562-b3fc-2c963f66afa6" required></div>
+        <div class="row">
+          <div class="field"><label>ชื่อ</label><input type="text" id="u-name" required></div>
+          <div class="field"><label>บทบาท</label>
+            <select id="u-role">
+              <option value="farm_clerk">เสมียนประจำฟาร์ม</option>
+              <option value="central_clerk">เสมียนส่วนกลาง</option>
+              <option value="owner">เจ้าของ</option>
+            </select>
+          </div>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label>ฟาร์มที่ดูแล (เลือกได้หลายฟาร์ม — ว่างไว้ถ้าเป็นเจ้าของ/เสมียนส่วนกลาง)</label>
+            <select id="u-farms" multiple size="5"></select>
+          </div>
+          <div class="field">
+            <label>หมวดที่ดูแล (เลือกได้หลายหมวด — ว่างไว้ถ้าเป็นเจ้าของ/เสมียนส่วนกลาง)</label>
+            <select id="u-domains" multiple size="3">
+              <option value="medicine">ยา</option>
+              <option value="construction">ก่อสร้าง</option>
+              <option value="feedmill">โรงงานอาหารสัตว์</option>
+            </select>
+          </div>
+        </div>
+        <button class="btn" type="submit">บันทึกสิทธิ์ผู้ใช้</button>
+        <span id="form-status" class="muted"></span>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>รายชื่อผู้ใช้ในระบบ</h2>
+      <table>
+        <thead><tr><th>ชื่อ</th><th>บทบาท</th><th>ฟาร์ม</th><th>หมวด</th><th>สถานะ</th></tr></thead>
+        <tbody id="user-rows"><tr><td colspan="5" class="muted">กำลังโหลด...</td></tr></tbody>
+      </table>
+    </div>
+  </main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="shared/supabase-client.js"></script>
+<script src="shared/auth-guard.js"></script>
+<script>
+async function loadUsers() {
+  const { data } = await sb.from("ops_users").select("*").order("created_at");
+  const tbody = document.getElementById("user-rows");
+  const roleLabel = { owner: "เจ้าของ", central_clerk: "เสมียนส่วนกลาง", farm_clerk: "เสมียนประจำฟาร์ม" };
+  tbody.innerHTML = (data && data.length) ? data.map(u => `
+    <tr>
+      <td>${escapeHtml(u.name || "")}</td>
+      <td>${roleLabel[u.role] || u.role}</td>
+      <td>${(u.farms || []).map(escapeHtml).join(", ") || "-"}</td>
+      <td>${(u.domains || []).map(d => DOMAIN_LABELS[d] || d).join(", ") || "-"}</td>
+      <td>${u.active ? '<span class="badge ok">ใช้งาน</span>' : '<span class="badge danger">ปิดใช้งาน</span>'}</td>
+    </tr>
+  `).join("") : `<tr><td colspan="5" class="muted">ยังไม่มีผู้ใช้</td></tr>`;
+}
+
+(async () => {
+  const user = await requireAuth();
+  if (!user) return;
+  if (!requireRole(["owner"])) return;
+
+  const { data: farms } = await sb.from("farms").select("name").order("name");
+  document.getElementById("u-farms").innerHTML = (farms || []).map(f => `<option value="${escapeHtml(f.name)}">${escapeHtml(f.name)}</option>`).join("");
+
+  await loadUsers();
+
+  document.getElementById("user-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const statusEl = document.getElementById("form-status");
+    const selectedFarms = [...document.getElementById("u-farms").selectedOptions].map(o => o.value);
+    const selectedDomains = [...document.getElementById("u-domains").selectedOptions].map(o => o.value);
+    const { error } = await sb.from("ops_users").upsert({
+      user_id: document.getElementById("u-uid").value.trim(),
+      name: document.getElementById("u-name").value.trim(),
+      role: document.getElementById("u-role").value,
+      farms: selectedFarms,
+      domains: selectedDomains,
+      active: true,
+    });
+    if (error) { statusEl.textContent = "บันทึกไม่สำเร็จ: " + error.message; return; }
+    statusEl.textContent = "บันทึกเรียบร้อยแล้ว";
+    document.getElementById("user-form").reset();
+    loadUsers();
+  });
+})();
+</script>
+</body>
+</html>

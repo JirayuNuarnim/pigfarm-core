@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ใบส่งงานช่าง - THE CORE</title>
+<link rel="stylesheet" href="shared/style.css">
+</head>
+<body data-page="jobs">
+<div class="layout">
+  <nav id="nav-root" class="sidebar no-print"></nav>
+  <main class="content" id="main-content"><p class="muted">กำลังโหลด...</p></main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="shared/supabase-client.js"></script>
+<script src="shared/auth-guard.js"></script>
+<script>
+const params = new URLSearchParams(window.location.search);
+const jobId = params.get("id");
+const main = document.getElementById("main-content");
+const JOB_TYPES = ["งานช่าง", "วิ่งทราย", "ถมดิน", "งานเหมาอื่นๆ"];
+
+function renderList() {
+  main.innerHTML = `
+    <div class="page-header">
+      <div><h1>ใบส่งงานช่าง</h1><p class="subtitle">งานช่าง / วิ่งทราย / ถมดิน ต่อฟาร์ม</p></div>
+      <button class="btn" id="new-btn">+ สร้างใบส่งงานใหม่</button>
+    </div>
+    <table>
+      <thead><tr><th>เลขที่</th><th>ประเภท</th><th>ฟาร์ม</th><th>ช่าง</th><th>วันที่</th><th>สถานะ</th><th></th></tr></thead>
+      <tbody id="job-rows"><tr><td colspan="7" class="muted">กำลังโหลด...</td></tr></tbody>
+    </table>
+  `;
+  document.getElementById("new-btn").addEventListener("click", () => window.location.href = "jobs-new.html");
+  loadList();
+}
+
+async function loadList() {
+  const { data } = await sb.from("ops_job_submissions").select("*").order("id", { ascending: false }).limit(200);
+  const tbody = document.getElementById("job-rows");
+  tbody.innerHTML = (data && data.length) ? data.map(j => `
+    <tr>
+      <td>${escapeHtml(j.doc_no || "#" + j.id)}</td>
+      <td>${escapeHtml(j.job_type)}</td>
+      <td>${escapeHtml(j.farm)}</td>
+      <td>${escapeHtml(j.worker_name)}</td>
+      <td>${j.txn_date}</td>
+      <td><span class="badge ${STATUS_BADGE_CLASS[j.status] || ""}">${escapeHtml(j.status)}</span></td>
+      <td><a class="link" href="jobs.html?id=${j.id}">ดูรายละเอียด</a></td>
+    </tr>
+  `).join("") : `<tr><td colspan="7" class="muted">ยังไม่มีใบส่งงาน</td></tr>`;
+}
+
+async function renderDetail() {
+  const { data: job, error } = await sb.from("ops_job_submissions").select("*").eq("id", jobId).single();
+  if (error || !job) { main.innerHTML = `<div class="card"><h1>ไม่พบใบส่งงาน</h1></div>`; return; }
+  const { data: items } = await sb.from("ops_job_items").select("*").eq("job_id", jobId);
+  const { data: deductions } = await sb.from("ops_job_deductions").select("*").eq("job_id", jobId);
+  const { data: voucher } = await sb.from("ops_vouchers").select("*").eq("job_id", jobId).maybeSingle();
+
+  const gross = (items || []).reduce((s, it) => s + it.qty * it.unit_price, 0);
+  const totalDeduct = (deductions || []).reduce((s, d) => s + Number(d.amount), 0);
+  const net = gross - totalDeduct;
+  const canManage = isOwner() || isCentral();
+
+  main.innerHTML = `
+    <div class="page-header">
+      <div><h1>${escapeHtml(job.doc_no || "#" + job.id)} <span class="badge">${escapeHtml(job.job_type)}</span></h1>
+      <p class="subtitle">ฟาร์ม ${escapeHtml(job.farm)} · ช่าง/ผู้รับงาน ${escapeHtml(job.worker_name)} · วันที่ ${job.txn_date}</p></div>
+      <a class="btn secondary" href="jobs-print.html?id=${job.id}" target="_blank">🖨️ พิมพ์</a>
+    </div>
+    ${canManage ? `
+    <div class="card">
+      <p>สถานะปัจจุบัน: <span class="badge ${STATUS_BADGE_CLASS[job.status] || ""}">${escapeHtml(job.status)}</span></p>
+      <select id="status-select">
+        ${["รอตรวจ", "อนุมัติแล้ว", "จ่ายแล้ว"].map(s => `<option value="${s}" ${job.status === s ? "selected" : ""}>${s}</option>`).join("")}
+      </select>
+      <button class="btn small" id="update-status-btn">อัปเดตสถานะ</button>
+    </div>` : `<p>สถานะปัจจุบัน: <span class="badge ${STATUS_BADGE_CLASS[job.status] || ""}">${escapeHtml(job.status)}</span></p>`}
+
+    <div class="card">
+      <h2>รายการงาน</h2>
+      <table>
+        <thead><tr><th>รายการ</th><th>จำนวน</th><th>ราคาต่อหน่วย</th><th>ยอดรวม</th></tr></thead>
+        <tbody>
+          ${(items || []).map(it => `<tr><td>${escapeHtml(it.description)}</td><td class="text-right">${formatNumber(it.qty, 0)}</td><td class="text-right">${formatNumber(it.unit_price)}</td><td class="text-right">${formatNumber(it.qty * it.unit_price)}</td></tr>`).join("")}
+          <tr><td colspan="3" class="text-right"><b>รวม</b></td><td class="text-right"><b>${formatNumber(gross)}</b></td></tr>
+          ${(deductions || []).map(d => `<tr><td colspan="3" class="text-right">หัก: ${escapeHtml(d.description)}</td><td class="text-right">-${formatNumber(d.amount)}</td></tr>`).join("")}
+          <tr><td colspan="3" class="text-right"><b>ยอดสุทธิ</b></td><td class="text-right"><b>${formatNumber(net)}</b></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>ใบสำคัญจ่าย</h2>
+      ${voucher ? `<p>สร้างใบสำคัญจ่ายแล้ว: <a class="link" href="vouchers.html?id=${voucher.id}">${escapeHtml(voucher.doc_no)}</a></p>` :
+        (canManage ? `<p>สร้างใบสำคัญจ่ายเงินจากงานนี้ ยอดสุทธิ ${formatNumber(net)} บาท</p><button class="btn" id="create-voucher-btn">สร้างใบสำคัญจ่าย</button>` : `<p class="muted">ยังไม่มีใบสำคัญจ่าย</p>`)}
+      <div id="voucher-status" class="muted"></div>
+    </div>
+  `;
+
+  document.getElementById("update-status-btn")?.addEventListener("click", async () => {
+    const status = document.getElementById("status-select").value;
+    await sb.from("ops_job_submissions").update({ status }).eq("id", jobId);
+    renderDetail();
+  });
+
+  document.getElementById("create-voucher-btn")?.addEventListener("click", async () => {
+    const statusEl = document.getElementById("voucher-status");
+    statusEl.textContent = "กำลังสร้าง...";
+    const { data: docNo } = await sb.rpc("ops_next_doc_no", { p_doc_type: "voucher", p_farm: job.farm });
+    const { data: v, error } = await sb.from("ops_vouchers").insert({
+      doc_no: docNo, voucher_type: "จ่ายเงิน", farm: job.farm, payee_name: job.worker_name,
+      txn_date: todayISO(), job_id: job.id, total_amount: net, note: `ค่าแรง ${job.doc_no}`,
+    }).select().single();
+    if (error) { statusEl.textContent = "สร้างไม่สำเร็จ: " + error.message; return; }
+    const voucherItems = (items || []).map(it => ({ voucher_id: v.id, description: it.description, amount: it.qty * it.unit_price }))
+      .concat((deductions || []).map(d => ({ voucher_id: v.id, description: "หัก: " + d.description, amount: -d.amount })));
+    await sb.from("ops_voucher_items").insert(voucherItems);
+    await sb.from("ops_job_submissions").update({ status: "อนุมัติแล้ว" }).eq("id", jobId);
+    window.location.href = `vouchers.html?id=${v.id}`;
+  });
+}
+
+(async () => {
+  const user = await requireAuth();
+  if (!user) return;
+  if (jobId) renderDetail(); else renderList();
+})();
+</script>
+</body>
+</html>

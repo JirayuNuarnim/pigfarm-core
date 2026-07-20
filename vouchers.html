@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ใบสำคัญรับ/จ่ายเงิน - THE CORE</title>
+<link rel="stylesheet" href="shared/style.css">
+</head>
+<body data-page="vouchers">
+<div class="layout">
+  <nav id="nav-root" class="sidebar no-print"></nav>
+  <main class="content" id="main-content"><p class="muted">กำลังโหลด...</p></main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="shared/supabase-client.js"></script>
+<script src="shared/auth-guard.js"></script>
+<script src="shared/thai-baht-text.js"></script>
+<script>
+const params = new URLSearchParams(window.location.search);
+const voucherId = params.get("id");
+const main = document.getElementById("main-content");
+
+function renderList() {
+  main.innerHTML = `
+    <div class="page-header">
+      <div><h1>ใบสำคัญรับ / จ่ายเงิน</h1><p class="subtitle">เอกสารการเงินสำหรับพิมพ์ให้เจ้าของเซ็นแล้วส่งบัญชี</p></div>
+      <button class="btn" id="new-btn">+ สร้างใบสำคัญใหม่</button>
+    </div>
+    <table>
+      <thead><tr><th>เลขที่</th><th>ประเภท</th><th>ฟาร์ม</th><th>ผู้รับ/จ่าย</th><th>วันที่</th><th>จำนวนเงิน</th><th>สถานะ</th><th></th></tr></thead>
+      <tbody id="v-rows"><tr><td colspan="8" class="muted">กำลังโหลด...</td></tr></tbody>
+    </table>
+  `;
+  document.getElementById("new-btn").addEventListener("click", () => window.location.href = "vouchers-new.html");
+  loadList();
+}
+
+async function loadList() {
+  const { data } = await sb.from("ops_vouchers").select("*").order("id", { ascending: false }).limit(200);
+  const tbody = document.getElementById("v-rows");
+  tbody.innerHTML = (data && data.length) ? data.map(v => `
+    <tr>
+      <td>${escapeHtml(v.doc_no || "#" + v.id)}</td>
+      <td>${escapeHtml(v.voucher_type)}</td>
+      <td>${escapeHtml(v.farm)}</td>
+      <td>${escapeHtml(v.payee_name)}</td>
+      <td>${v.txn_date}</td>
+      <td class="text-right">${formatNumber(v.total_amount)}</td>
+      <td><span class="badge ${STATUS_BADGE_CLASS[v.status] || ""}">${escapeHtml(v.status)}</span></td>
+      <td><a class="link" href="vouchers.html?id=${v.id}">ดูรายละเอียด</a></td>
+    </tr>
+  `).join("") : `<tr><td colspan="8" class="muted">ยังไม่มีใบสำคัญ</td></tr>`;
+}
+
+async function renderDetail() {
+  const { data: v, error } = await sb.from("ops_vouchers").select("*").eq("id", voucherId).single();
+  if (error || !v) { main.innerHTML = `<div class="card"><h1>ไม่พบใบสำคัญ</h1></div>`; return; }
+  const { data: items } = await sb.from("ops_voucher_items").select("*").eq("voucher_id", voucherId);
+  const canManage = isOwner() || isCentral();
+
+  main.innerHTML = `
+    <div class="page-header">
+      <div><h1>${escapeHtml(v.doc_no || "#" + v.id)} <span class="badge">${escapeHtml(v.voucher_type)}</span></h1>
+      <p class="subtitle">ฟาร์ม ${escapeHtml(v.farm)} · ${escapeHtml(v.payee_name)} · วันที่ ${v.txn_date}</p></div>
+      <a class="btn secondary" href="vouchers-print.html?id=${v.id}" target="_blank">🖨️ พิมพ์</a>
+    </div>
+    ${canManage ? `
+    <div class="card">
+      <p>สถานะปัจจุบัน: <span class="badge ${STATUS_BADGE_CLASS[v.status] || ""}">${escapeHtml(v.status)}</span></p>
+      <select id="status-select">
+        ${["ร่าง", "อนุมัติแล้ว", "พิมพ์แล้ว"].map(s => `<option value="${s}" ${v.status === s ? "selected" : ""}>${s}</option>`).join("")}
+      </select>
+      <button class="btn small" id="update-status-btn">อัปเดตสถานะ</button>
+    </div>` : `<p>สถานะปัจจุบัน: <span class="badge">${escapeHtml(v.status)}</span></p>`}
+
+    <div class="card">
+      <h2>รายการ</h2>
+      <table>
+        <thead><tr><th>รายการ</th><th>จำนวนเงิน</th></tr></thead>
+        <tbody>
+          ${(items || []).map(it => `<tr><td>${escapeHtml(it.description)}</td><td class="text-right">${formatNumber(it.amount)}</td></tr>`).join("")}
+          <tr><td class="text-right"><b>รวม</b></td><td class="text-right"><b>${formatNumber(v.total_amount)}</b></td></tr>
+        </tbody>
+      </table>
+      <p class="muted">(${numberToThaiText(v.total_amount)})</p>
+      ${v.note ? `<p class="muted">หมายเหตุ: ${escapeHtml(v.note)}</p>` : ""}
+    </div>
+  `;
+
+  document.getElementById("update-status-btn")?.addEventListener("click", async () => {
+    await sb.from("ops_vouchers").update({ status: document.getElementById("status-select").value }).eq("id", voucherId);
+    renderDetail();
+  });
+}
+
+(async () => {
+  const user = await requireAuth();
+  if (!user) return;
+  if (voucherId) renderDetail(); else renderList();
+})();
+</script>
+</body>
+</html>

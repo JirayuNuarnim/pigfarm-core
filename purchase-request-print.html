@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<title>ใบขอซื้อ - THE CORE</title>
+<link rel="stylesheet" href="shared/print.css">
+</head>
+<body>
+<div class="toolbar"><button onclick="window.print()">🖨️ พิมพ์</button></div>
+<div class="print-page">
+  <div class="doc-company">บริษัท เอสเจเอฟ ฟาร์ม จำกัด</div>
+  <div class="doc-title">ใบขอซื้อวัสดุอุปกรณ์</div>
+  <div class="doc-meta">
+    <div id="meta-left"></div>
+    <div id="meta-right"></div>
+  </div>
+  <table class="doc-table">
+    <thead><tr><th style="width:40px;">ลำดับ</th><th>รายการ</th><th>จำนวน</th><th>หน่วย</th><th>ราคา/หน่วย</th><th>รวม</th></tr></thead>
+    <tbody id="rows"><tr><td colspan="6">กำลังโหลด...</td></tr></tbody>
+  </table>
+  <div class="signatures">
+    <div class="sig"><div class="line"></div>ผู้ขอ</div>
+    <div class="sig"><div class="line"></div>เสมียนส่วนกลาง</div>
+    <div class="sig"><div class="line"></div>เจ้าของ (อนุมัติ)</div>
+  </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="shared/supabase-client.js"></script>
+<script>
+(async () => {
+  const params = new URLSearchParams(window.location.search);
+  const id = params.get("id");
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) { window.location.href = "index.html"; return; }
+
+  const { data: req } = await sb.from("ops_purchase_requests").select("*").eq("id", id).single();
+  if (!req) return;
+  const { data: items } = await sb.from("ops_purchase_request_items").select("*").eq("request_id", id);
+  let supplierName = "";
+  if (req.supplier_id) {
+    const { data: sup } = await sb.from("ops_suppliers").select("name").eq("id", req.supplier_id).single();
+    supplierName = sup ? sup.name : "";
+  }
+
+  document.getElementById("meta-left").innerHTML = `
+    <div>เลขที่: ${escapeHtml(req.doc_no || "#" + req.id)}</div>
+    <div>ฟาร์ม: ${escapeHtml(req.farm)}</div>
+    <div>หมวดหมู่: ${escapeHtml(DOMAIN_LABELS[req.domain] || req.domain)}</div>
+    ${supplierName ? `<div>ผู้ขาย: ${escapeHtml(supplierName)}</div>` : ""}
+  `;
+  document.getElementById("meta-right").innerHTML = `
+    <div>วันที่: ${new Date(req.created_at).toLocaleDateString("th-TH")}</div>
+    <div>ผู้ขอ: ${escapeHtml(req.requested_by || "")}</div>
+  `;
+
+  let total = 0;
+  const rows = (items || []).map((it, i) => {
+    const amount = it.qty * it.unit_price;
+    total += amount;
+    return `<tr>
+      <td class="num">${i + 1}</td>
+      <td>${escapeHtml(it.description)}</td>
+      <td class="num">${formatNumber(it.qty, 0)}</td>
+      <td>${escapeHtml(it.unit || "")}</td>
+      <td class="num">${formatNumber(it.unit_price)}</td>
+      <td class="num">${formatNumber(amount)}</td>
+    </tr>`;
+  });
+  rows.push(`<tr class="doc-total-row"><td colspan="5" class="num">รวมเป็นเงิน</td><td class="num">${formatNumber(total)}</td></tr>`);
+  document.getElementById("rows").innerHTML = rows.join("");
+})();
+</script>
+</body>
+</html>

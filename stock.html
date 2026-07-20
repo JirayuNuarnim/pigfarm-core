@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>คลังสินค้า - THE CORE</title>
+<link rel="stylesheet" href="shared/style.css">
+</head>
+<body data-page="stock">
+<div class="layout">
+  <nav id="nav-root" class="sidebar no-print"></nav>
+  <main class="content">
+    <div class="page-header">
+      <div><h1>คลังสินค้า / Stock</h1><p class="subtitle" id="scope-line"></p></div>
+      <button class="btn" id="new-item-btn" style="display:none;">+ เพิ่มสินค้าใหม่</button>
+    </div>
+
+    <div class="card" style="display:flex; gap:14px; align-items:end; flex-wrap:wrap;">
+      <div class="field" style="margin:0; flex:2; min-width:200px;">
+        <label>ค้นหาชื่อสินค้า</label>
+        <input type="text" id="q" placeholder="พิมพ์ชื่อสินค้า">
+      </div>
+      <div class="field" style="margin:0; flex:1; min-width:160px;">
+        <label>หมวดหมู่</label>
+        <select id="domain-filter"><option value="">ทั้งหมด</option></select>
+      </div>
+      <div class="field" style="margin:0; flex:1; min-width:160px;">
+        <label>ฟาร์ม</label>
+        <select id="farm-filter"></select>
+      </div>
+    </div>
+
+    <table>
+      <thead><tr><th>สินค้า</th><th>หมวดหมู่</th><th>หน่วย</th><th>คงเหลือ</th><th>ราคา/หน่วย</th><th></th></tr></thead>
+      <tbody id="item-rows"><tr><td colspan="6" class="muted">กำลังโหลด...</td></tr></tbody>
+    </table>
+
+    <div id="new-item-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.4); align-items:center; justify-content:center;">
+      <div class="card" style="width:400px;">
+        <h2 style="margin-top:0;">เพิ่มสินค้าใหม่</h2>
+        <form id="new-item-form">
+          <div class="field"><label>หมวดหมู่</label><select id="ni-domain" required></select></div>
+          <div class="field"><label>ชื่อสินค้า</label><input type="text" id="ni-name" required></div>
+          <div class="row">
+            <div class="field"><label>หน่วยนับ</label><input type="text" id="ni-unit" value="ชิ้น"></div>
+            <div class="field"><label>ราคาเริ่มต้น</label><input type="number" step="0.01" id="ni-price" value="0"></div>
+          </div>
+          <button class="btn" type="submit">บันทึก</button>
+          <button class="btn secondary" type="button" id="ni-cancel">ยกเลิก</button>
+        </form>
+      </div>
+    </div>
+  </main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="shared/supabase-client.js"></script>
+<script src="shared/auth-guard.js"></script>
+<script>
+let selectedFarm = null;
+
+async function loadFarmOptions() {
+  const sel = document.getElementById("farm-filter");
+  let farms = [];
+  if (canSeeAllFarms()) {
+    const { data } = await sb.from("farms").select("name").order("name");
+    farms = (data || []).map(f => f.name);
+  } else {
+    farms = myFarms();
+  }
+  sel.innerHTML = farms.map(f => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join("");
+  selectedFarm = farms[0] || null;
+}
+
+function loadDomainOptions() {
+  const sel = document.getElementById("domain-filter");
+  const domains = canSeeAllFarms() ? Object.keys(DOMAIN_LABELS) : myDomains();
+  sel.innerHTML = '<option value="">ทั้งหมด</option>' + domains.map(d => `<option value="${d}">${DOMAIN_LABELS[d] || d}</option>`).join("");
+}
+
+async function loadItems() {
+  const q = document.getElementById("q").value.trim();
+  const domain = document.getElementById("domain-filter").value;
+  const farm = document.getElementById("farm-filter").value;
+  selectedFarm = farm;
+  document.getElementById("scope-line").textContent = `ฟาร์ม: ${farm || "-"}`;
+
+  let query = sb.from("ops_stock_overview").select("*").eq("farm", farm).order("name").limit(200);
+  if (domain) query = query.eq("domain", domain);
+  if (q) query = query.ilike("name", `%${q}%`);
+  const { data, error } = await query;
+  const tbody = document.getElementById("item-rows");
+  if (error) {
+    tbody.innerHTML = `<tr><td colspan="6" class="muted">โหลดข้อมูลไม่สำเร็จ: ${escapeHtml(error.message)}</td></tr>`;
+    return;
+  }
+  if (!data || !data.length) {
+    tbody.innerHTML = `<tr><td colspan="6" class="muted">ไม่พบสินค้า</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = data.map(it => `
+    <tr>
+      <td>${escapeHtml(it.name)}</td>
+      <td>${escapeHtml(DOMAIN_LABELS[it.domain] || it.domain)}</td>
+      <td>${escapeHtml(it.unit)}</td>
+      <td class="text-right">${formatNumber(it.balance, 0)} ${it.reorder_point > 0 && it.balance <= it.reorder_point ? '<span class="badge warn">ใกล้หมด</span>' : ''}</td>
+      <td class="text-right">${formatNumber(it.unit_price)}</td>
+      <td><a class="link" href="stock-item.html?item=${it.item_id}&farm=${encodeURIComponent(it.farm)}">ดู / บันทึกรับ-จ่าย</a></td>
+    </tr>
+  `).join("");
+}
+
+(async () => {
+  const user = await requireAuth();
+  if (!user) return;
+  await loadFarmOptions();
+  loadDomainOptions();
+  await loadItems();
+
+  document.getElementById("q").addEventListener("input", () => loadItems());
+  document.getElementById("domain-filter").addEventListener("change", () => loadItems());
+  document.getElementById("farm-filter").addEventListener("change", () => loadItems());
+
+  if (isOwner() || isCentral()) {
+    document.getElementById("new-item-btn").style.display = "";
+    const niDomainSel = document.getElementById("ni-domain");
+    niDomainSel.innerHTML = Object.entries(DOMAIN_LABELS).map(([k,v]) => `<option value="${k}">${v}</option>`).join("");
+  }
+  document.getElementById("new-item-btn").addEventListener("click", () => {
+    document.getElementById("new-item-modal").style.display = "flex";
+  });
+  document.getElementById("ni-cancel").addEventListener("click", () => {
+    document.getElementById("new-item-modal").style.display = "none";
+  });
+  document.getElementById("new-item-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const { error } = await sb.from("ops_items").insert({
+      domain: document.getElementById("ni-domain").value,
+      name: document.getElementById("ni-name").value.trim(),
+      unit: document.getElementById("ni-unit").value.trim() || "ชิ้น",
+      default_unit_price: parseFloat(document.getElementById("ni-price").value) || 0,
+    });
+    if (error) { alert("บันทึกไม่สำเร็จ: " + error.message); return; }
+    document.getElementById("new-item-modal").style.display = "none";
+    document.getElementById("new-item-form").reset();
+    loadItems();
+  });
+})();
+</script>
+</body>
+</html>

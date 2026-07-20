@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>สร้างใบสำคัญ - THE CORE</title>
+<link rel="stylesheet" href="shared/style.css">
+</head>
+<body data-page="vouchers">
+<div class="layout">
+  <nav id="nav-root" class="sidebar no-print"></nav>
+  <main class="content">
+    <h1>สร้างใบสำคัญรับ / จ่ายเงิน</h1>
+    <div class="card">
+      <form id="v-form">
+        <div class="row">
+          <div class="field"><label>ประเภท</label>
+            <select id="v-type"><option value="จ่ายเงิน">ใบสำคัญจ่ายเงิน</option><option value="รับเงิน">ใบสำคัญรับเงิน</option></select>
+          </div>
+          <div class="field"><label>ฟาร์ม</label><select id="farm" required></select></div>
+          <div class="field"><label>วันที่</label><input type="date" id="txn-date" required></div>
+        </div>
+        <div class="field"><label>ชื่อผู้รับเงิน/ผู้จ่ายเงิน</label><input type="text" id="payee" required></div>
+
+        <h2>รายการ</h2>
+        <table class="items-table" id="items-table">
+          <tr><th>รายการ</th><th>จำนวนเงิน</th><th></th></tr>
+          <tbody id="items-body">
+            <tr><td><input type="text" name="desc"></td><td><input type="number" step="0.01" name="amount"></td><td><button type="button" class="btn danger small" onclick="removeRow(this)">ลบ</button></td></tr>
+            <tr class="row-template" style="display:none;"><td><input type="text" name="desc"></td><td><input type="number" step="0.01" name="amount"></td><td><button type="button" class="btn danger small" onclick="removeRow(this)">ลบ</button></td></tr>
+          </tbody>
+        </table>
+        <p><button type="button" class="btn secondary small" onclick="addRow('items-body')">+ เพิ่มรายการ</button></p>
+
+        <div class="field"><label>หมายเหตุ</label><textarea id="note" rows="2"></textarea></div>
+        <button class="btn" type="submit">บันทึก</button>
+        <a class="btn secondary" href="vouchers.html">ยกเลิก</a>
+        <span id="form-status" class="muted"></span>
+      </form>
+    </div>
+  </main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="shared/supabase-client.js"></script>
+<script src="shared/auth-guard.js"></script>
+<script src="shared/dynamic-rows.js"></script>
+<script>
+(async () => {
+  const user = await requireAuth();
+  if (!user) return;
+  document.getElementById("txn-date").value = todayISO();
+
+  const farmSel = document.getElementById("farm");
+  let farms = [];
+  if (canSeeAllFarms()) {
+    const { data } = await sb.from("farms").select("name").order("name");
+    farms = (data || []).map(f => f.name);
+  } else {
+    farms = myFarms();
+  }
+  farmSel.innerHTML = farms.map(f => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join("");
+
+  document.getElementById("v-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const statusEl = document.getElementById("form-status");
+    const farm = farmSel.value;
+    const itemRows = [...document.querySelectorAll("#items-body tr:not(.row-template)")].map(r => ({
+      description: r.querySelector('[name="desc"]').value.trim(),
+      amount: parseFloat(r.querySelector('[name="amount"]').value) || 0,
+    })).filter(it => it.description);
+
+    if (!itemRows.length) { statusEl.textContent = "กรุณาเพิ่มรายการอย่างน้อย 1 รายการ"; return; }
+    const total = itemRows.reduce((s, it) => s + it.amount, 0);
+
+    statusEl.textContent = "กำลังบันทึก...";
+    const { data: docNo } = await sb.rpc("ops_next_doc_no", { p_doc_type: "voucher", p_farm: farm });
+    const { data: v, error } = await sb.from("ops_vouchers").insert({
+      doc_no: docNo, voucher_type: document.getElementById("v-type").value, farm,
+      payee_name: document.getElementById("payee").value.trim(),
+      txn_date: document.getElementById("txn-date").value,
+      total_amount: total, note: document.getElementById("note").value.trim(),
+      created_by: user.user_id,
+    }).select().single();
+
+    if (error) { statusEl.textContent = "บันทึกไม่สำเร็จ: " + error.message; return; }
+    await sb.from("ops_voucher_items").insert(itemRows.map(it => ({ ...it, voucher_id: v.id })));
+    window.location.href = `vouchers.html?id=${v.id}`;
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ผู้ขาย - THE CORE</title>
+<link rel="stylesheet" href="shared/style.css">
+</head>
+<body data-page="suppliers">
+<div class="layout">
+  <nav id="nav-root" class="sidebar no-print"></nav>
+  <main class="content">
+    <h1>ผู้ขาย / ร้านค้า</h1>
+    <p class="subtitle">ข้อมูลผู้ขาย เบอร์ติดต่อ และประวัติราคาที่เคยซื้อ</p>
+
+    <div class="card">
+      <h2>เพิ่มผู้ขายใหม่</h2>
+      <form id="supplier-form" class="row">
+        <div class="field"><label>ชื่อผู้ขาย</label><input type="text" id="s-name" required></div>
+        <div class="field"><label>เบอร์โทร</label><input type="text" id="s-phone"></div>
+        <div class="field"><label>ที่อยู่</label><input type="text" id="s-address"></div>
+        <div class="field" style="flex:0; align-self:end;"><button class="btn" type="submit">+ เพิ่ม</button></div>
+      </form>
+    </div>
+
+    <table>
+      <thead><tr><th>ชื่อผู้ขาย</th><th>เบอร์โทร</th><th>ที่อยู่</th><th></th></tr></thead>
+      <tbody id="supplier-rows"><tr><td colspan="4" class="muted">กำลังโหลด...</td></tr></tbody>
+    </table>
+
+    <div class="card">
+      <h2>ประวัติราคาที่เคยซื้อ</h2>
+      <div class="row" style="margin-bottom:12px;">
+        <div class="field"><label>ค้นหาสินค้า</label><input type="text" id="price-search" placeholder="พิมพ์ชื่อสินค้า"></div>
+      </div>
+      <table>
+        <thead><tr><th>วันที่</th><th>สินค้า</th><th>ผู้ขาย</th><th>ราคา/หน่วย</th><th>หมายเหตุ</th></tr></thead>
+        <tbody id="price-history-rows"><tr><td colspan="5" class="muted">พิมพ์ชื่อสินค้าเพื่อค้นหา</td></tr></tbody>
+      </table>
+    </div>
+  </main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="shared/supabase-client.js"></script>
+<script src="shared/auth-guard.js"></script>
+<script>
+async function loadSuppliers() {
+  const { data } = await sb.from("ops_suppliers").select("*").order("name");
+  const tbody = document.getElementById("supplier-rows");
+  tbody.innerHTML = (data && data.length) ? data.map(s => `
+    <tr><td>${escapeHtml(s.name)}</td><td>${escapeHtml(s.phone || "")}</td><td>${escapeHtml(s.address || "")}</td><td></td></tr>
+  `).join("") : `<tr><td colspan="4" class="muted">ยังไม่มีผู้ขาย</td></tr>`;
+}
+
+async function searchPriceHistory(q) {
+  const tbody = document.getElementById("price-history-rows");
+  if (!q) { tbody.innerHTML = `<tr><td colspan="5" class="muted">พิมพ์ชื่อสินค้าเพื่อค้นหา</td></tr>`; return; }
+  const { data: items } = await sb.from("ops_items").select("id, name").ilike("name", `%${q}%`).limit(20);
+  if (!items || !items.length) { tbody.innerHTML = `<tr><td colspan="5" class="muted">ไม่พบสินค้า</td></tr>`; return; }
+  const itemIds = items.map(i => i.id);
+  const itemNameById = Object.fromEntries(items.map(i => [i.id, i.name]));
+  const { data: history } = await sb.from("ops_supplier_price_history")
+    .select("*, ops_suppliers(name)").in("item_id", itemIds)
+    .order("purchased_at", { ascending: false }).limit(50);
+  if (!history || !history.length) { tbody.innerHTML = `<tr><td colspan="5" class="muted">ยังไม่มีประวัติราคาสำหรับสินค้านี้</td></tr>`; return; }
+  tbody.innerHTML = history.map(h => `
+    <tr>
+      <td>${h.purchased_at}</td>
+      <td>${escapeHtml(itemNameById[h.item_id] || "")}</td>
+      <td>${escapeHtml(h.ops_suppliers ? h.ops_suppliers.name : "")}</td>
+      <td class="text-right">${formatNumber(h.unit_price)}</td>
+      <td>${escapeHtml(h.note || "")}</td>
+    </tr>
+  `).join("");
+}
+
+(async () => {
+  const user = await requireAuth();
+  if (!user) return;
+  if (!requireRole(["owner", "central_clerk"])) return;
+
+  await loadSuppliers();
+
+  document.getElementById("supplier-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const { error } = await sb.from("ops_suppliers").insert({
+      name: document.getElementById("s-name").value.trim(),
+      phone: document.getElementById("s-phone").value.trim(),
+      address: document.getElementById("s-address").value.trim(),
+    });
+    if (!error) {
+      document.getElementById("supplier-form").reset();
+      loadSuppliers();
+    } else {
+      alert("บันทึกไม่สำเร็จ: " + error.message);
+    }
+  });
+
+  let searchTimeout;
+  document.getElementById("price-search").addEventListener("input", (e) => {
+    clearTimeout(searchTimeout);
+    const q = e.target.value.trim();
+    searchTimeout = setTimeout(() => searchPriceHistory(q), 300);
+  });
+})();
+</script>
+</body>
+</html>

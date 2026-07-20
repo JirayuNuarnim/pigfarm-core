@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>รายละเอียดสินค้า - THE CORE</title>
+<link rel="stylesheet" href="shared/style.css">
+</head>
+<body data-page="stock">
+<div class="layout">
+  <nav id="nav-root" class="sidebar no-print"></nav>
+  <main class="content">
+    <div class="page-header">
+      <div>
+        <h1 id="item-name">-</h1>
+        <p class="subtitle" id="item-meta"></p>
+      </div>
+      <a class="btn secondary" id="print-link" target="_blank">🖨️ พิมพ์บัตรสต๊อก</a>
+    </div>
+
+    <div class="stat-grid">
+      <div class="stat-card"><div class="num" id="balance-num">-</div><div class="label" id="balance-label">คงเหลือ</div></div>
+    </div>
+
+    <div class="card">
+      <h2>บันทึกรับเข้า / เบิกจ่าย / ปรับปรุงยอด</h2>
+      <form id="txn-form">
+        <div class="row">
+          <div class="field">
+            <label>วันที่</label>
+            <input type="date" id="txn-date" required>
+          </div>
+          <div class="field">
+            <label>ประเภทรายการ</label>
+            <select id="txn-type" required>
+              <option value="รับเข้า">รับเข้า (ซื้อ/รับของ)</option>
+              <option value="เบิกจ่าย">เบิกจ่าย (นำไปใช้งาน)</option>
+              <option value="ปรับปรุงยอด(เพิ่ม)">ปรับปรุงยอด - เพิ่ม</option>
+              <option value="ปรับปรุงยอด(ลด)">ปรับปรุงยอด - ลด</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>จำนวน</label>
+            <input type="number" step="0.01" id="txn-qty" required>
+          </div>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label>เลขที่อ้างอิง (ถ้ามี)</label>
+            <input type="text" id="txn-ref">
+          </div>
+          <div class="field">
+            <label>หมายเหตุ</label>
+            <input type="text" id="txn-note">
+          </div>
+          <div class="field">
+            <label>รูปยืนยัน (รับเข้า/เบิกจ่ายต้องแนบรูป)</label>
+            <input type="file" id="txn-photo" accept="image/*" capture="environment">
+          </div>
+        </div>
+        <button class="btn" type="submit">บันทึกรายการ</button>
+        <span id="txn-status" class="muted"></span>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>ประวัติรับ-จ่าย</h2>
+      <table>
+        <thead><tr><th>วันที่</th><th>ประเภท</th><th>จำนวน</th><th>คงเหลือสะสม</th><th>อ้างอิง/หมายเหตุ</th><th>รูป</th></tr></thead>
+        <tbody id="history-rows"><tr><td colspan="6" class="muted">กำลังโหลด...</td></tr></tbody>
+      </table>
+    </div>
+  </main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="shared/supabase-client.js"></script>
+<script src="shared/auth-guard.js"></script>
+<script>
+const params = new URLSearchParams(window.location.search);
+const itemId = params.get("item");
+const farm = params.get("farm");
+
+async function loadHistory() {
+  const { data, error } = await sb.from("ops_stock_transactions")
+    .select("*")
+    .eq("item_id", itemId).eq("farm", farm)
+    .order("txn_date", { ascending: true }).order("id", { ascending: true });
+  const tbody = document.getElementById("history-rows");
+  if (error || !data) {
+    tbody.innerHTML = `<tr><td colspan="6" class="muted">โหลดไม่สำเร็จ</td></tr>`;
+    return;
+  }
+  if (!data.length) {
+    tbody.innerHTML = `<tr><td colspan="6" class="muted">ยังไม่มีประวัติ</td></tr>`;
+    document.getElementById("balance-num").textContent = "0";
+    return;
+  }
+  let running = 0;
+  const attachmentIds = [];
+  const rowsHtml = [];
+  for (const t of data) {
+    running += Number(t.qty);
+    attachmentIds.push(t.id);
+  }
+  const { data: attachments } = await sb.from("ops_attachments")
+    .select("entity_id, storage_path")
+    .eq("entity_type", "stock_transaction")
+    .in("entity_id", attachmentIds);
+  const photoByTxn = {};
+  for (const a of (attachments || [])) photoByTxn[a.entity_id] = a.storage_path;
+
+  running = 0;
+  const runningByTxn = {};
+  for (const t of data) {
+    running += Number(t.qty);
+    runningByTxn[t.id] = running;
+  }
+  document.getElementById("balance-num").textContent = formatNumber(running, 0);
+
+  rowsHtml.push(...data.slice().reverse().map(t => {
+    let photoCell = "";
+    if (photoByTxn[t.id]) {
+      photoCell = `<a href="#" onclick="viewPhoto('${photoByTxn[t.id]}');return false;">ดูรูป</a>`;
+    }
+    return `<tr>
+      <td>${t.txn_date}</td>
+      <td>${escapeHtml(t.txn_type)}</td>
+      <td class="text-right">${t.qty > 0 ? "+" : ""}${formatNumber(t.qty, 0)}</td>
+      <td class="text-right">${formatNumber(runningByTxn[t.id], 0)}</td>
+      <td>${escapeHtml([t.ref_no, t.note].filter(Boolean).join(" / "))}</td>
+      <td>${photoCell}</td>
+    </tr>`;
+  }));
+  tbody.innerHTML = rowsHtml.join("");
+}
+
+async function viewPhoto(path) {
+  const { data, error } = await sb.storage.from("ops-attachments").createSignedUrl(path, 300);
+  if (data && data.signedUrl) window.open(data.signedUrl, "_blank");
+}
+
+(async () => {
+  const user = await requireAuth();
+  if (!user) return;
+
+  const { data: item } = await sb.from("ops_items").select("*").eq("id", itemId).single();
+  if (!item) { document.getElementById("item-name").textContent = "ไม่พบสินค้า"; return; }
+  document.getElementById("item-name").textContent = item.name;
+  document.getElementById("item-meta").textContent = `${DOMAIN_LABELS[item.domain] || item.domain} · หน่วย: ${item.unit} · ฟาร์ม: ${farm}`;
+  document.getElementById("balance-label").textContent = `คงเหลือที่ ${farm}`;
+  document.getElementById("print-link").href = `stock-print.html?item=${itemId}&farm=${encodeURIComponent(farm)}`;
+  document.getElementById("txn-date").value = todayISO();
+
+  await loadHistory();
+
+  document.getElementById("txn-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const type = document.getElementById("txn-type").value;
+    const qtyRaw = parseFloat(document.getElementById("txn-qty").value);
+    const isIn = type === "รับเข้า" || type === "ปรับปรุงยอด(เพิ่ม)";
+    const signedQty = isIn ? qtyRaw : -qtyRaw;
+    const displayType = type.replace("(เพิ่ม)", "").replace("(ลด)", "");
+    const photoFile = document.getElementById("txn-photo").files[0];
+    const statusEl = document.getElementById("txn-status");
+
+    if ((type === "รับเข้า" || type === "เบิกจ่าย") && !photoFile) {
+      statusEl.textContent = "กรุณาแนบรูปยืนยันสำหรับรายการรับเข้า/เบิกจ่าย";
+      return;
+    }
+
+    statusEl.textContent = "กำลังบันทึก...";
+    const { data: inserted, error } = await sb.from("ops_stock_transactions").insert({
+      item_id: itemId,
+      farm: farm,
+      txn_date: document.getElementById("txn-date").value,
+      txn_type: displayType,
+      qty: signedQty,
+      ref_no: document.getElementById("txn-ref").value.trim(),
+      note: document.getElementById("txn-note").value.trim(),
+      created_by: (await sb.auth.getUser()).data.user.id,
+    }).select().single();
+
+    if (error) { statusEl.textContent = "บันทึกไม่สำเร็จ: " + error.message; return; }
+
+    if (photoFile) {
+      const path = `stock/${farm}/${itemId}/${Date.now()}-${photoFile.name}`;
+      const { error: upErr } = await sb.storage.from("ops-attachments").upload(path, photoFile);
+      if (!upErr) {
+        await sb.from("ops_attachments").insert({
+          entity_type: "stock_transaction",
+          entity_id: inserted.id,
+          storage_path: path,
+          uploaded_by: (await sb.auth.getUser()).data.user.id,
+        });
+      }
+    }
+    statusEl.textContent = "บันทึกเรียบร้อยแล้ว";
+    document.getElementById("txn-form").reset();
+    document.getElementById("txn-date").value = todayISO();
+    await loadHistory();
+  });
+})();
+</script>
+</body>
+</html>

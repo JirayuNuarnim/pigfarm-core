@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<title>บัตรสต๊อก - THE CORE</title>
+<link rel="stylesheet" href="shared/print.css">
+</head>
+<body>
+<div class="toolbar"><button onclick="window.print()">🖨️ พิมพ์</button></div>
+<div class="print-page">
+  <div class="doc-company" id="company-name">บริษัท เอสเจเอฟ ฟาร์ม จำกัด</div>
+  <div class="doc-title">บัตรสต๊อกสินค้า</div>
+  <div class="doc-meta">
+    <div>
+      <div id="meta-name">ชื่อสินค้า: -</div>
+      <div id="meta-domain">หมวดหมู่: -</div>
+      <div id="meta-farm">ฟาร์ม: -</div>
+    </div>
+    <div>
+      <div id="meta-unit">หน่วยนับ: -</div>
+      <div id="meta-price">ราคาต่อหน่วย: -</div>
+    </div>
+  </div>
+
+  <table class="doc-table">
+    <thead>
+      <tr><th>วันที่</th><th>รายการ</th><th>รับเข้า</th><th>เบิกจ่าย</th><th>คงเหลือ</th><th>อ้างอิง/หมายเหตุ</th></tr>
+    </thead>
+    <tbody id="rows"><tr><td colspan="6">กำลังโหลด...</td></tr></tbody>
+  </table>
+
+  <div class="signatures">
+    <div class="sig"><div class="line"></div>ผู้บันทึก</div>
+    <div class="sig"><div class="line"></div>ผู้ตรวจสอบ</div>
+  </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="shared/supabase-client.js"></script>
+<script>
+(async () => {
+  const params = new URLSearchParams(window.location.search);
+  const itemId = params.get("item");
+  const farm = params.get("farm");
+
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) { window.location.href = "index.html"; return; }
+
+  const { data: item } = await sb.from("ops_items").select("*").eq("id", itemId).single();
+  if (!item) return;
+  document.getElementById("meta-name").textContent = "ชื่อสินค้า: " + item.name;
+  document.getElementById("meta-domain").textContent = "หมวดหมู่: " + (DOMAIN_LABELS[item.domain] || item.domain);
+  document.getElementById("meta-farm").textContent = "ฟาร์ม: " + farm;
+  document.getElementById("meta-unit").textContent = "หน่วยนับ: " + item.unit;
+  document.getElementById("meta-price").textContent = "ราคาต่อหน่วย: " + formatNumber(item.default_unit_price) + " บาท";
+
+  const { data: txns } = await sb.from("ops_stock_transactions")
+    .select("*").eq("item_id", itemId).eq("farm", farm)
+    .order("txn_date", { ascending: true }).order("id", { ascending: true });
+
+  let running = 0;
+  const rows = (txns || []).map(t => {
+    running += Number(t.qty);
+    return `<tr>
+      <td>${t.txn_date}</td>
+      <td>${escapeHtml(t.txn_type)}</td>
+      <td class="num">${t.qty > 0 ? formatNumber(t.qty, 0) : ""}</td>
+      <td class="num">${t.qty < 0 ? formatNumber(-t.qty, 0) : ""}</td>
+      <td class="num">${formatNumber(running, 0)}</td>
+      <td>${escapeHtml([t.ref_no, t.note].filter(Boolean).join(" / "))}</td>
+    </tr>`;
+  });
+  document.getElementById("rows").innerHTML = rows.length ? rows.join("") : '<tr><td colspan="6">ไม่มีข้อมูล</td></tr>';
+})();
+</script>
+</body>
+</html>

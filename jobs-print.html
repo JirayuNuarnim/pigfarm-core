@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<title>ใบส่งงานช่าง - THE CORE</title>
+<link rel="stylesheet" href="shared/print.css">
+</head>
+<body>
+<div class="toolbar"><button onclick="window.print()">🖨️ พิมพ์</button></div>
+<div class="print-page">
+  <div class="doc-company">บริษัท เอสเจเอฟ ฟาร์ม จำกัด</div>
+  <div class="doc-title" id="doc-title">ใบส่งงาน</div>
+  <div class="doc-meta">
+    <div id="meta-left"></div>
+    <div id="meta-right"></div>
+  </div>
+  <p id="job-desc"></p>
+  <table class="doc-table">
+    <thead><tr><th style="width:40px;">ลำดับ</th><th>รายการ</th><th>จำนวน</th><th>ราคาต่อหน่วย</th><th>จำนวนเงิน</th></tr></thead>
+    <tbody id="rows"><tr><td colspan="5">กำลังโหลด...</td></tr></tbody>
+  </table>
+  <div class="signatures">
+    <div class="sig"><div class="line"></div>ผู้ส่งงาน (ช่าง)</div>
+    <div class="sig"><div class="line"></div>ผู้ตรวจงาน</div>
+    <div class="sig"><div class="line"></div>ผู้อนุมัติจ่าย</div>
+  </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="shared/supabase-client.js"></script>
+<script>
+(async () => {
+  const params = new URLSearchParams(window.location.search);
+  const id = params.get("id");
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) { window.location.href = "index.html"; return; }
+
+  const { data: job } = await sb.from("ops_job_submissions").select("*").eq("id", id).single();
+  if (!job) return;
+  const { data: items } = await sb.from("ops_job_items").select("*").eq("job_id", id);
+  const { data: deductions } = await sb.from("ops_job_deductions").select("*").eq("job_id", id);
+
+  document.getElementById("doc-title").textContent = job.job_type === "งานช่าง" ? "ใบส่งงาน" : `ใบส่งงาน (${job.job_type})`;
+  document.getElementById("meta-left").innerHTML = `
+    <div>เลขที่: ${escapeHtml(job.doc_no || "#" + job.id)}</div>
+    <div>ฟาร์ม: ${escapeHtml(job.farm)}</div>
+    <div>ช่าง/ผู้รับงาน: ${escapeHtml(job.worker_name)}</div>
+  `;
+  document.getElementById("meta-right").innerHTML = `<div>วันที่ส่งงาน: ${job.txn_date}</div>`;
+  if (job.description) document.getElementById("job-desc").textContent = "รายละเอียดงาน: " + job.description;
+
+  let gross = 0;
+  const rows = (items || []).map((it, i) => {
+    const amt = it.qty * it.unit_price;
+    gross += amt;
+    return `<tr><td class="num">${i+1}</td><td>${escapeHtml(it.description)}</td><td class="num">${formatNumber(it.qty,0)}</td><td class="num">${formatNumber(it.unit_price)}</td><td class="num">${formatNumber(amt)}</td></tr>`;
+  });
+  rows.push(`<tr class="doc-total-row"><td colspan="4" class="num">รวมเป็นเงิน</td><td class="num">${formatNumber(gross)}</td></tr>`);
+  let totalDeduct = 0;
+  (deductions || []).forEach(d => {
+    totalDeduct += Number(d.amount);
+    rows.push(`<tr><td colspan="4" class="num">หัก: ${escapeHtml(d.description)}</td><td class="num">-${formatNumber(d.amount)}</td></tr>`);
+  });
+  rows.push(`<tr class="doc-total-row"><td colspan="4" class="num">ยอดสุทธิที่ต้องจ่าย</td><td class="num">${formatNumber(gross - totalDeduct)}</td></tr>`);
+  document.getElementById("rows").innerHTML = rows.join("");
+})();
+</script>
+</body>
+</html>
