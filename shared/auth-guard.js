@@ -1,5 +1,11 @@
 let CURRENT_USER = null;
 
+// ==== โหมดพัฒนา: ล็อกอินอัตโนมัติ (ปิดหน้าล็อกอินชั่วคราว) ====
+// ตั้งเป็น false เพื่อกลับมาใช้ระบบล็อกอินปกติก่อนใช้งานจริง
+const DEV_AUTOLOGIN = true;
+const DEV_AUTOLOGIN_EMAIL = "eatgreendrinkclean@gmail.com";
+const DEV_AUTOLOGIN_PASSWORD = "TestPassword123!";
+
 const ROLE_LABELS = {
   owner: "เจ้าของ",
   central_clerk: "เสมียนส่วนกลาง",
@@ -7,7 +13,11 @@ const ROLE_LABELS = {
 };
 
 async function requireAuth() {
-  const { data: { session } } = await sb.auth.getSession();
+  let { data: { session } } = await sb.auth.getSession();
+  if (!session && DEV_AUTOLOGIN) {
+    await sb.auth.signInWithPassword({ email: DEV_AUTOLOGIN_EMAIL, password: DEV_AUTOLOGIN_PASSWORD });
+    ({ data: { session } } = await sb.auth.getSession());
+  }
   if (!session) {
     window.location.href = "index.html";
     return null;

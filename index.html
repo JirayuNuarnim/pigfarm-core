@@ -10,6 +10,7 @@
 <div class="login-wrap">
   <div class="login-card">
     <h1>🌾 THE CORE</h1>
+    <p id="autologin-msg" class="muted" style="text-align:center; display:none;">กำลังเข้าสู่ระบบ...</p>
     <div id="error-box" class="flash error" style="display:none;"></div>
     <form id="login-form">
       <div class="field">
@@ -28,9 +29,23 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="shared/supabase-client.js"></script>
 <script>
+// ==== โหมดพัฒนา: ล็อกอินอัตโนมัติ (ปิดหน้าล็อกอินชั่วคราว) ====
+// ตั้งเป็น false เพื่อกลับมาใช้หน้าล็อกอินปกติ
+const DEV_AUTOLOGIN = true;
+const DEV_AUTOLOGIN_EMAIL = "eatgreendrinkclean@gmail.com";
+const DEV_AUTOLOGIN_PASSWORD = "TestPassword123!";
+
 (async () => {
   const { data: { session } } = await sb.auth.getSession();
-  if (session) window.location.href = "dashboard.html";
+  if (session) { window.location.href = "dashboard.html"; return; }
+  if (DEV_AUTOLOGIN) {
+    document.getElementById("login-form").style.display = "none";
+    document.getElementById("autologin-msg").style.display = "block";
+    const { error } = await sb.auth.signInWithPassword({ email: DEV_AUTOLOGIN_EMAIL, password: DEV_AUTOLOGIN_PASSWORD });
+    if (!error) { window.location.href = "dashboard.html"; return; }
+    document.getElementById("login-form").style.display = "";
+    document.getElementById("autologin-msg").style.display = "none";
+  }
 })();
 
 document.getElementById("login-form").addEventListener("submit", async (e) => {
