@@ -6,7 +6,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const DOMAIN_LABELS = {
   medicine: "ยา",
   construction: "ก่อสร้าง",
-  feedmill: "โรงงานอาหารสัตว์",
+  feedmill: "โรงงานอาหาร",
 };
 
 const STATUS_BADGE_CLASS = {
