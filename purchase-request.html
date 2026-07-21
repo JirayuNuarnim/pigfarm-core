@@ -40,6 +40,24 @@
   .tl-step.reject .tl-title { color:#d9534f; }
   .tl-step.self .tl-dot { background:#c9973a; border-color:#c9973a; color:#fff; }
   .tl-step.self .tl-title { color:#c9973a; }
+  .preview-row { display:grid; grid-template-columns: 1.15fr 1fr; gap:16px; margin-bottom:16px; align-items:start; }
+  @media (max-width: 1000px) { .preview-row { grid-template-columns: 1fr; } }
+  .pv-panel { border-radius:12px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,.1); background:#fff; }
+  .pv-head { padding:12px 16px; color:#fff; font-weight:bold; font-size:15px; }
+  .pv-head.blue { background:#2b6cb0; }
+  .pv-head.purple { background:#7c5cbf; }
+  .pv-body { padding:14px 16px; }
+  .doc-mini { background:#fff; border:1px solid #e3e7e4; border-radius:8px; padding:16px 20px; color:#000; }
+  .doc-mini .m-company { text-align:center; font-weight:bold; font-size:16px; }
+  .doc-mini .m-title { text-align:center; font-weight:bold; font-size:15px; text-decoration:underline; margin:4px 0 10px; }
+  .doc-mini .m-meta { display:flex; justify-content:space-between; font-size:12.5px; margin-bottom:8px; line-height:1.5; }
+  .doc-mini table { width:100%; border-collapse:collapse; }
+  .doc-mini th, .doc-mini td { border:1px solid #333; padding:3px 6px; font-size:12.5px; }
+  .doc-mini th { background:#eee; }
+  .doc-mini .m-total { text-align:right; font-weight:bold; margin-top:6px; font-size:14px; }
+  .qt-gallery { display:grid; grid-template-columns:repeat(auto-fill, minmax(96px,1fr)); gap:8px; }
+  .qt-thumb img { width:100%; height:96px; object-fit:cover; border-radius:6px; border:1px solid #ddd; cursor:pointer; background:#f4f4f4; }
+  .qt-empty { color:#999; font-size:13px; }
 </style>
 </head>
 <body data-page="purchase-request">
@@ -194,6 +212,32 @@ function renderTimeline(req, approvedAt, rejected) {
   return html;
 }
 
+// visual preview of the saved purchase-order document (top-left of detail page)
+function renderDocPreview(req, items, supplierName) {
+  const el = document.getElementById("doc-preview");
+  if (!el) return;
+  const dateStr = new Date(req.created_at).toLocaleDateString("th-TH");
+  const rows = (items || []).map((it, i) => `<tr>
+    <td style="text-align:center;">${i + 1}</td>
+    <td>${escapeHtml(it.description)}</td>
+    <td style="text-align:right;">${formatNumber(it.qty, 0)}</td>
+    <td style="text-align:right;">${formatNumber(it.unit_price)}</td>
+    <td style="text-align:right;">${formatNumber(it.qty * it.unit_price)}</td></tr>`).join("");
+  const total = (items || []).reduce((s, it) => s + it.qty * it.unit_price, 0);
+  el.innerHTML = `<div class="doc-mini">
+    <div class="m-company">บริษัท เอสเจเอฟ ฟาร์ม จำกัด</div>
+    <div class="m-title">ใบขอซื้อวัสดุอุปกรณ์</div>
+    <div class="m-meta">
+      <div>เลขที่: ${escapeHtml(req.doc_no || "#" + req.id)}<br>ฟาร์ม: ${escapeHtml(req.farm)}<br>ผู้ขาย: ${escapeHtml(supplierName || "-")}</div>
+      <div style="text-align:right;">วันที่: ${dateStr}<br>ผู้ขอ: ${escapeHtml(req.requested_by || "")}<br>สถานะ: ${escapeHtml(req.status)}</div>
+    </div>
+    <table><thead><tr><th style="width:28px;">#</th><th>รายการ</th><th style="width:52px;">จำนวน</th><th style="width:64px;">ราคา</th><th style="width:72px;">รวม</th></tr></thead>
+    <tbody>${rows || `<tr><td colspan="5" style="text-align:center;color:#999;padding:10px;">— ไม่มีรายการ —</td></tr>`}</tbody></table>
+    <div class="m-total">รวมเป็นเงิน ${formatNumber(total)} บาท</div>
+    ${req.note ? `<div style="font-size:12px;margin-top:6px;">หมายเหตุ: ${escapeHtml(req.note)}</div>` : ""}
+  </div>`;
+}
+
 async function renderDetail() {
   const { data: req, error } = await sb.from("ops_purchase_requests").select("*").eq("id", requestId).single();
   if (error || !req) { main.innerHTML = `<div class="card"><h1>ไม่พบใบขอซื้อ</h1></div>`; return; }
@@ -222,6 +266,17 @@ async function renderDetail() {
       </div>
     </div>
 
+    <div class="preview-row">
+      <div class="pv-panel">
+        <div class="pv-head blue">👁️ ตัวอย่างเอกสาร</div>
+        <div class="pv-body"><div id="doc-preview"></div></div>
+      </div>
+      <div class="pv-panel">
+        <div class="pv-head purple">📑 ใบเสนอราคา / เอกสารที่แนบ</div>
+        <div class="pv-body"><div id="attached-docs"><p class="muted" style="font-size:13px;">กำลังโหลด...</p></div></div>
+      </div>
+    </div>
+
     <div class="card">
       <h2>ขั้นตอนการดำเนินการ</h2>
       <div class="timeline">${renderTimeline(req, approvedAt, rejected)}</div>
@@ -244,11 +299,11 @@ async function renderDetail() {
           ${(items || []).map(it => `
             <tr data-id="${it.id}">
               <td>${escapeHtml(it.description)}</td>
-              <td class="text-right">${formatNumber(it.qty, 0)}</td>
+              <td class="text-right">${canPrice ? `<input type="number" step="0.01" class="pr-qty" value="${it.qty}" style="width:70px;">` : formatNumber(it.qty, 0)}</td>
               <td>${escapeHtml(it.unit || "")}</td>
               <td class="text-right">${canPrice ? `<input type="number" step="0.01" class="pr-price" value="${it.unit_price}" style="width:90px;">` : formatNumber(it.unit_price)}</td>
               <td class="text-right">${formatNumber(it.qty * it.unit_price)}</td>
-              ${canPrice ? `<td><button class="btn small save-price-btn">บันทึกราคา</button></td>` : ""}
+              ${canPrice ? `<td><button class="btn small save-price-btn">บันทึก</button></td>` : ""}
             </tr>
           `).join("")}
           <tr><td colspan="4" class="text-right"><b>รวมทั้งหมด</b></td><td class="text-right"><b>${formatNumber((items || []).reduce((s, it) => s + it.qty * it.unit_price, 0))}</b></td>${canPrice ? "<td></td>" : ""}</tr>
@@ -278,17 +333,22 @@ async function renderDetail() {
     </div>
   `;
 
+  const supplierName = (suppliers || []).find(s => s.id == req.supplier_id)?.name || "";
+  renderDocPreview(req, items, supplierName);
+
   document.getElementById("save-supplier-btn")?.addEventListener("click", async () => {
     const supplierId = document.getElementById("supplier-select").value || null;
     const { error } = await sb.from("ops_purchase_requests").update({ supplier_id: supplierId }).eq("id", requestId);
     document.getElementById("action-status").textContent = error ? "บันทึกไม่สำเร็จ" : "บันทึกผู้ขายแล้ว";
+    if (!error) renderDetail();
   });
 
   document.querySelectorAll(".save-price-btn").forEach(btn => {
     btn.addEventListener("click", async () => {
       const row = btn.closest("tr");
+      const qty = parseFloat(row.querySelector(".pr-qty").value) || 0;
       const price = parseFloat(row.querySelector(".pr-price").value) || 0;
-      const { error } = await sb.from("ops_purchase_request_items").update({ unit_price: price }).eq("id", row.dataset.id);
+      const { error } = await sb.from("ops_purchase_request_items").update({ qty, unit_price: price }).eq("id", row.dataset.id);
       if (!error) renderDetail();
     });
   });
@@ -370,6 +430,18 @@ async function renderAttachments(userId) {
     if (url) img.src = url;
   }
   imgs.forEach((img, i) => { img.style.cursor = "pointer"; img.onclick = () => openLightbox(signed, i); });
+
+  // mirror the attached images into the top gallery panel (like the create dashboard)
+  const gal = document.getElementById("attached-docs");
+  if (gal) {
+    const valid = signed.filter(Boolean);
+    if (!valid.length) {
+      gal.innerHTML = `<div class="qt-empty">ยังไม่มีเอกสารแนบ</div>`;
+    } else {
+      gal.innerHTML = `<div class="qt-gallery">` + valid.map((u, i) => `<div class="qt-thumb"><img src="${u}" data-i="${i}"></div>`).join("") + `</div>`;
+      gal.querySelectorAll(".qt-thumb img").forEach(img => img.addEventListener("click", () => openLightbox(valid, +img.dataset.i)));
+    }
+  }
 
   container.querySelectorAll(".att-upload").forEach(btn => btn.addEventListener("click", async () => {
     const kind = btn.dataset.kind;
