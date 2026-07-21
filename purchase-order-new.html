@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>สร้างใบขอซื้อ - THE CORE</title>
+<link rel="stylesheet" href="shared/style.css">
+<style>
+  .order-grid { display: grid; grid-template-columns: 300px 1fr 320px; gap: 16px; align-items: start; }
+  @media (max-width: 1100px) { .order-grid { grid-template-columns: 1fr; } }
+  .panel { border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.1); background: #fff; }
+  .panel-head { padding: 12px 16px; color: #fff; font-weight: bold; font-size: 15px; display:flex; justify-content:space-between; align-items:center; }
+  .panel-body { padding: 14px 16px; }
+  .p1 .panel-head { background: #1d9e75; }
+  .p2 .panel-head { background: #d85a30; }
+  .p3 .panel-head { background: #c9973a; }
+  .pick-item { padding: 10px 12px; border:1px solid #e3e7e4; border-radius:8px; margin-bottom:8px; cursor:pointer; }
+  .pick-item:hover { background:#f2f8f5; border-color:#1d9e75; }
+  .pick-item.selected { background:#e1f5ee; border-color:#1d9e75; }
+  .pick-item .nm { font-weight:bold; }
+  .pick-item .sub { font-size:12px; color:#777; }
+  .catalog-item { display:flex; justify-content:space-between; align-items:center; padding:8px 10px; border-bottom:1px solid #eee; }
+  .catalog-item:hover { background:#fffaf0; }
+  .bill-line td { padding:5px 6px; }
+  .mini { width:70px; padding:5px 6px; }
+  .flat-input { width:100%; padding:8px 10px; border:1px solid #ccd0d5; border-radius:6px; font-size:14px; margin-bottom:10px; font-family:inherit; }
+</style>
+</head>
+<body data-page="purchase-request">
+<div class="layout">
+  <nav id="nav-root" class="sidebar no-print"></nav>
+  <main class="content">
+    <div class="page-header">
+      <div><h1>สร้างใบขอซื้อ (Dashboard)</h1><p class="subtitle">เลือกผู้ขาย → เลือกสินค้าที่เขามี → สร้างบิลส่งเข้าศูนย์กลาง</p></div>
+      <a class="btn secondary" href="purchase-request.html">← กลับรายการใบขอซื้อ</a>
+    </div>
+
+    <div class="order-grid">
+      <!-- SECTION 1: SUPPLIERS -->
+      <div class="panel p1">
+        <div class="panel-head">1 · ผู้ขาย / ผู้ติดต่อ</div>
+        <div class="panel-body">
+          <input type="text" id="supplier-search" class="flat-input" placeholder="ค้นหาผู้ขาย">
+          <div id="supplier-list" style="max-height:420px; overflow:auto;"><p class="muted">กำลังโหลด...</p></div>
+          <button class="btn small secondary" id="add-supplier-btn" style="margin-top:8px;">+ เพิ่มผู้ขายใหม่</button>
+        </div>
+      </div>
+
+      <!-- SECTION 2: BILL -->
+      <div class="panel p2">
+        <div class="panel-head">2 · บิลใบขอซื้อ</div>
+        <div class="panel-body">
+          <div class="row" style="gap:10px;">
+            <div class="field" style="flex:1;"><label>ฟาร์ม</label><select id="farm" class="flat-input"></select></div>
+            <div class="field" style="flex:1;"><label>ผู้ขาย</label><input type="text" id="bill-supplier" class="flat-input" readonly placeholder="— เลือกจากช่อง 1 —"></div>
+          </div>
+          <div class="field"><label>ผู้ขอ</label><input type="text" id="requested-by" class="flat-input"></div>
+          <table style="width:100%; border-collapse:collapse;">
+            <thead><tr><th style="text-align:left;">รายการ</th><th>จำนวน</th><th>ราคา</th><th>รวม</th><th></th></tr></thead>
+            <tbody id="bill-lines"><tr><td colspan="5" class="muted" style="padding:12px;">ยังไม่มีรายการ — เลือกจากช่อง 3 ด้านขวา</td></tr></tbody>
+          </table>
+          <div style="text-align:right; font-size:18px; font-weight:bold; margin:12px 0;">รวมทั้งหมด <span id="grand-total">0.00</span> บาท</div>
+          <div class="field"><label>หมายเหตุ</label><textarea id="note" class="flat-input" rows="2"></textarea></div>
+          <button class="btn" id="save-btn" style="width:100%;">บันทึกใบขอซื้อ (ส่งเข้าศูนย์กลาง)</button>
+          <div id="save-status" class="muted" style="margin-top:8px;"></div>
+        </div>
+      </div>
+
+      <!-- SECTION 3: SUPPLIER CATALOG -->
+      <div class="panel p3">
+        <div class="panel-head">3 · สินค้าที่ผู้ขายมี</div>
+        <div class="panel-body">
+          <p class="muted" id="catalog-hint" style="margin-top:0;">เลือกผู้ขายก่อน แล้วรายการสินค้าจะขึ้นที่นี่</p>
+          <div id="catalog-list" style="max-height:340px; overflow:auto;"></div>
+          <hr style="margin:14px 0;">
+          <label style="font-size:13px; font-weight:bold;">หาสินค้าอื่นเพิ่ม (ทุกหมวด)</label>
+          <input type="text" id="item-search" class="flat-input" placeholder="พิมพ์ชื่อสินค้า">
+          <div id="item-search-results" style="max-height:200px; overflow:auto;"></div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="shared/supabase-client.js"></script>
+<script src="shared/auth-guard.js"></script>
+<script>
+let SUPPLIERS = [];
+let SELECTED_SUPPLIER = null;
+let BILL = []; // {item_id, name, unit, domain, qty, price}
+
+function renderSuppliers() {
+  const q = document.getElementById("supplier-search").value.trim();
+  const list = SUPPLIERS.filter(s => !q || (s.name && s.name.includes(q)) || (s.phone && s.phone.includes(q)));
+  const el = document.getElementById("supplier-list");
+  if (!list.length) { el.innerHTML = `<p class="muted">ไม่พบผู้ขาย</p>`; return; }
+  el.innerHTML = list.map(s => `
+    <div class="pick-item ${SELECTED_SUPPLIER && SELECTED_SUPPLIER.id === s.id ? 'selected' : ''}" onclick="selectSupplier(${s.id})">
+      <div class="nm">${escapeHtml(s.name)}</div>
+      <div class="sub">${escapeHtml(s.phone || "")}${s.address ? " · " + escapeHtml(s.address) : ""}</div>
+    </div>
+  `).join("");
+}
+
+async function selectSupplier(id) {
+  SELECTED_SUPPLIER = SUPPLIERS.find(s => s.id === id);
+  document.getElementById("bill-supplier").value = SELECTED_SUPPLIER ? SELECTED_SUPPLIER.name : "";
+  renderSuppliers();
+  await loadCatalog();
+}
+
+async function loadCatalog() {
+  const hint = document.getElementById("catalog-hint");
+  const el = document.getElementById("catalog-list");
+  if (!SELECTED_SUPPLIER) { hint.style.display = "block"; el.innerHTML = ""; return; }
+  hint.style.display = "none";
+  el.innerHTML = `<p class="muted">กำลังโหลด...</p>`;
+  // items this supplier has sold before (latest price per item)
+  const { data } = await sb.from("ops_supplier_price_history")
+    .select("item_id, unit_price, purchased_at, ops_items(name, unit, domain)")
+    .eq("supplier_id", SELECTED_SUPPLIER.id)
+    .order("purchased_at", { ascending: false });
+  const seen = new Set();
+  const items = [];
+  for (const r of (data || [])) {
+    if (seen.has(r.item_id)) continue;
+    seen.add(r.item_id);
+    items.push({ item_id: r.item_id, price: r.unit_price, name: r.ops_items?.name, unit: r.ops_items?.unit, domain: r.ops_items?.domain });
+  }
+  if (!items.length) {
+    el.innerHTML = `<p class="muted" style="font-size:13px;">ผู้ขายรายนี้ยังไม่มีประวัติสินค้า — ใช้ช่องค้นหาด้านล่างเพื่อเพิ่มสินค้าลงบิล</p>`;
+    return;
+  }
+  el.innerHTML = items.map(it => `
+    <div class="catalog-item">
+      <div><div style="font-weight:bold; font-size:14px;">${escapeHtml(it.name)}</div><div class="sub" style="font-size:12px; color:#777;">${DOMAIN_LABELS[it.domain] || it.domain} · ราคาล่าสุด ${formatNumber(it.price)}</div></div>
+      <button class="btn small" onclick='addToBill(${it.item_id}, ${JSON.stringify(it.name)}, ${JSON.stringify(it.unit || "")}, ${JSON.stringify(it.domain)}, ${it.price})'>+ เพิ่ม</button>
+    </div>
+  `).join("");
+}
+
+async function searchItems() {
+  const q = document.getElementById("item-search").value.trim();
+  const el = document.getElementById("item-search-results");
+  if (!q) { el.innerHTML = ""; return; }
+  const { data } = await sb.from("ops_items").select("id, name, unit, domain").ilike("name", `%${q}%`).limit(20);
+  el.innerHTML = (data || []).map(it => `
+    <div class="catalog-item">
+      <div><div style="font-size:14px;">${escapeHtml(it.name)}</div><div class="sub" style="font-size:12px; color:#777;">${DOMAIN_LABELS[it.domain] || it.domain}</div></div>
+      <button class="btn small secondary" onclick='addToBill(${it.id}, ${JSON.stringify(it.name)}, ${JSON.stringify(it.unit || "")}, ${JSON.stringify(it.domain)}, 0)'>+ เพิ่ม</button>
+    </div>
+  `).join("");
+}
+
+function addToBill(itemId, name, unit, domain, price) {
+  const existing = BILL.find(b => b.item_id === itemId);
+  if (existing) { existing.qty += 1; }
+  else BILL.push({ item_id: itemId, name, unit, domain, qty: 1, price: price || 0 });
+  renderBill();
+}
+
+function removeBillLine(idx) { BILL.splice(idx, 1); renderBill(); }
+function updateBillLine(idx, field, val) { BILL[idx][field] = parseFloat(val) || 0; renderBill(); }
+
+function renderBill() {
+  const tbody = document.getElementById("bill-lines");
+  if (!BILL.length) { tbody.innerHTML = `<tr><td colspan="5" class="muted" style="padding:12px;">ยังไม่มีรายการ — เลือกจากช่อง 3 ด้านขวา</td></tr>`; document.getElementById("grand-total").textContent = "0.00"; return; }
+  tbody.innerHTML = BILL.map((b, i) => `
+    <tr class="bill-line">
+      <td>${escapeHtml(b.name)}<div style="font-size:11px; color:#999;">${DOMAIN_LABELS[b.domain] || b.domain} ${escapeHtml(b.unit || "")}</div></td>
+      <td><input type="number" step="0.01" class="mini" value="${b.qty}" onchange="updateBillLine(${i}, 'qty', this.value)"></td>
+      <td><input type="number" step="0.01" class="mini" value="${b.price}" onchange="updateBillLine(${i}, 'price', this.value)"></td>
+      <td class="text-right">${formatNumber(b.qty * b.price)}</td>
+      <td><button class="btn danger small" onclick="removeBillLine(${i})">✕</button></td>
+    </tr>
+  `).join("");
+  document.getElementById("grand-total").textContent = formatNumber(BILL.reduce((s, b) => s + b.qty * b.price, 0));
+}
+
+(async () => {
+  const user = await requireAuth();
+  if (!user) return;
+  document.getElementById("requested-by").value = user.name || user.email;
+
+  const farmSel = document.getElementById("farm");
+  let farms = [];
+  if (canSeeAllFarms()) { const { data } = await sb.from("farms").select("name").order("name"); farms = (data || []).map(f => f.name); }
+  else farms = myFarms();
+  farmSel.innerHTML = farms.map(f => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join("");
+
+  const { data: sup } = await sb.from("ops_suppliers").select("*").order("name");
+  SUPPLIERS = sup || [];
+  renderSuppliers();
+
+  document.getElementById("supplier-search").addEventListener("input", renderSuppliers);
+  let t; document.getElementById("item-search").addEventListener("input", () => { clearTimeout(t); t = setTimeout(searchItems, 300); });
+
+  document.getElementById("add-supplier-btn").addEventListener("click", async () => {
+    const name = prompt("ชื่อผู้ขายใหม่"); if (!name) return;
+    const phone = prompt("เบอร์โทร (ไม่บังคับ)") || "";
+    const { data, error } = await sb.from("ops_suppliers").insert({ name: name.trim(), phone: phone.trim() }).select().single();
+    if (error) { alert("บันทึกไม่สำเร็จ: " + error.message); return; }
+    SUPPLIERS.push(data); renderSuppliers();
+  });
+
+  document.getElementById("save-btn").addEventListener("click", async () => {
+    const statusEl = document.getElementById("save-status");
+    if (!BILL.length) { statusEl.textContent = "กรุณาเพิ่มรายการอย่างน้อย 1 รายการ"; return; }
+    const farm = farmSel.value;
+    const requestedBy = document.getElementById("requested-by").value.trim();
+    const note = document.getElementById("note").value.trim();
+    const supplierId = SELECTED_SUPPLIER ? SELECTED_SUPPLIER.id : null;
+
+    // group bill items by domain -> one PR per domain
+    const byDomain = {};
+    for (const b of BILL) { (byDomain[b.domain] = byDomain[b.domain] || []).push(b); }
+
+    statusEl.textContent = "กำลังบันทึก...";
+    const createdDocs = [];
+    for (const domain of Object.keys(byDomain)) {
+      const { data: docNo } = await sb.rpc("ops_next_doc_no", { p_doc_type: "purchase", p_farm: farm });
+      const { data: req, error } = await sb.from("ops_purchase_requests").insert({
+        doc_no: docNo, farm, domain, requested_by: requestedBy, supplier_id: supplierId, note,
+      }).select().single();
+      if (error) { statusEl.textContent = "บันทึกไม่สำเร็จ: " + error.message; return; }
+      const items = byDomain[domain].map(b => ({
+        request_id: req.id, item_id: b.item_id, description: b.name, qty: b.qty, unit: b.unit, unit_price: b.price,
+      }));
+      await sb.from("ops_purchase_request_items").insert(items);
+      createdDocs.push({ id: req.id, doc_no: docNo });
+    }
+    if (createdDocs.length === 1) { window.location.href = `purchase-request.html?id=${createdDocs[0].id}`; }
+    else { statusEl.innerHTML = "สร้างใบขอซื้อ " + createdDocs.length + " ใบ (แยกตามหมวด): " + createdDocs.map(d => `<a class="link" href="purchase-request.html?id=${d.id}">${d.doc_no}</a>`).join(", "); BILL = []; renderBill(); }
+  });
+})();
+</script>
+</body>
+</html>
