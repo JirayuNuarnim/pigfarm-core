@@ -1,6 +1,15 @@
 const SUPABASE_URL = "https://hdnuiipfrwcggdhsucyp.supabase.co";
 const SUPABASE_KEY = "sb_publishable_08HO-fBjfWEN_XNTFEp6ow_9JJzZSj9";
 
+// app icon (favicon) for every page + the standalone app window
+(function () {
+  if (!document.querySelector('link[rel="icon"]')) {
+    const l = document.createElement("link");
+    l.rel = "icon"; l.href = "favicon.ico";
+    document.head.appendChild(l);
+  }
+})();
+
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const DOMAIN_LABELS = {
