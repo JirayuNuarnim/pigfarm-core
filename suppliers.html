@@ -43,8 +43,9 @@
       <div class="card" id="detail-card">
         <p class="muted" id="no-sup">← เลือกผู้ขายจากรายชื่อด้านซ้าย เพื่อดู/เพิ่มสินค้าที่ผู้ขายมี</p>
         <div id="detail-body" style="display:none;">
-          <div class="page-header" style="margin-bottom:8px;">
+          <div class="page-header" style="margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
             <h2 id="detail-name" style="margin:0;"></h2>
+            <button class="btn danger small" id="delete-sup-btn">ลบผู้ขายรายนี้</button>
           </div>
           <div class="row" style="gap:10px;">
             <div class="field" style="flex:1;"><label>เบอร์โทร</label><input type="text" id="detail-phone"></div>
@@ -189,6 +190,27 @@ async function loadDatalistForDomain(domain) {
     const idx = SUPPLIERS.findIndex(s => s.id === SELECTED.id); if (idx >= 0) { SUPPLIERS[idx].phone = phone; SUPPLIERS[idx].address = address; }
     renderSupList();
     alert("บันทึกข้อมูลติดต่อแล้ว");
+  });
+
+  document.getElementById("delete-sup-btn").addEventListener("click", async () => {
+    if (!SELECTED) return;
+    // block deletion if the supplier is used in any purchase request (important documents)
+    const { count } = await sb.from("ops_purchase_requests")
+      .select("id", { count: "exact", head: true }).eq("supplier_id", SELECTED.id);
+    if (count && count > 0) {
+      alert(`ลบไม่ได้ — ผู้ขาย "${SELECTED.name}" ถูกใช้ในใบขอซื้อ ${count} ใบ\nต้องเก็บไว้เป็นประวัติเอกสาร`);
+      return;
+    }
+    if (!confirm(`ลบผู้ขาย "${SELECTED.name}" ออกถาวร?\n(ประวัติราคา/แคตตาล็อกของผู้ขายรายนี้จะถูกลบไปด้วย)`)) return;
+    // remove catalog/price history first, then the supplier
+    await sb.from("ops_supplier_price_history").delete().eq("supplier_id", SELECTED.id);
+    const { error } = await sb.from("ops_suppliers").delete().eq("id", SELECTED.id);
+    if (error) { alert("ลบไม่สำเร็จ: " + error.message); return; }
+    SUPPLIERS = SUPPLIERS.filter(s => s.id !== SELECTED.id);
+    SELECTED = null;
+    document.getElementById("detail-body").style.display = "none";
+    document.getElementById("no-sup").style.display = "block";
+    renderSupList();
   });
 
   document.getElementById("ci-add-btn").addEventListener("click", async () => {
