@@ -54,8 +54,8 @@
 
           <h3>สินค้าที่ผู้ขายมี / ราคาที่เคยซื้อ</h3>
           <table>
-            <thead><tr><th>สินค้า</th><th>หมวด</th><th>ราคาล่าสุด</th><th>วันที่</th><th></th></tr></thead>
-            <tbody id="catalog-rows"><tr><td colspan="5" class="muted">ยังไม่มีสินค้า</td></tr></tbody>
+            <thead><tr><th>สินค้า</th><th>ขนาด</th><th>หมวด</th><th>ราคาล่าสุด</th><th>วันที่</th><th></th></tr></thead>
+            <tbody id="catalog-rows"><tr><td colspan="6" class="muted">ยังไม่มีสินค้า</td></tr></tbody>
           </table>
 
           <div style="border:1px dashed #ccc; border-radius:8px; padding:12px; margin-top:12px; background:#fffdf7;">
@@ -63,8 +63,12 @@
             <div style="display:flex; gap:8px; align-items:end; flex-wrap:wrap;">
               <div class="field" style="margin:0; flex:2; min-width:160px;">
                 <label>ชื่อสินค้า (พิมพ์ใหม่ หรือเลือกจากที่มี)</label>
-                <input type="text" id="ci-name" list="item-datalist" placeholder="พิมพ์ชื่อสินค้า">
+                <input type="text" id="ci-name" list="item-datalist" placeholder="เช่น ท่อ PVC">
                 <datalist id="item-datalist"></datalist>
+              </div>
+              <div class="field" style="margin:0;">
+                <label>ขนาด</label>
+                <input type="text" id="ci-size" placeholder="เช่น 1/2 นิ้ว" style="width:110px;">
               </div>
               <div class="field" style="margin:0;">
                 <label>หมวด</label>
@@ -118,7 +122,7 @@ async function selectSup(id) {
 
 async function loadCatalog() {
   const { data } = await sb.from("ops_supplier_price_history")
-    .select("id, item_id, unit_price, purchased_at, ops_items(name, domain)")
+    .select("id, item_id, unit_price, purchased_at, ops_items(name, domain, size)")
     .eq("supplier_id", SELECTED.id).order("purchased_at", { ascending: false });
   const seen = new Set();
   const rows = [];
@@ -131,11 +135,12 @@ async function loadCatalog() {
   tbody.innerHTML = rows.length ? rows.map(r => `
     <tr>
       <td>${escapeHtml(r.ops_items?.name || "")}</td>
+      <td>${escapeHtml(r.ops_items?.size || "-")}</td>
       <td>${DOMAIN_LABELS[r.ops_items?.domain] || r.ops_items?.domain || ""}</td>
       <td class="text-right">${formatNumber(r.unit_price)}</td>
       <td>${fmtDate(r.purchased_at)}</td>
       <td><button class="btn danger small" onclick="removeCatalog(${r.item_id})">ลบ</button></td>
-    </tr>`).join("") : `<tr><td colspan="5" class="muted">ยังไม่มีสินค้า — เพิ่มด้านล่าง</td></tr>`;
+    </tr>`).join("") : `<tr><td colspan="6" class="muted">ยังไม่มีสินค้า — เพิ่มด้านล่าง</td></tr>`;
 }
 
 async function removeCatalog(itemId) {
@@ -190,14 +195,17 @@ async function loadDatalistForDomain(domain) {
     const statusEl = document.getElementById("ci-status");
     const name = document.getElementById("ci-name").value.trim();
     if (!name) { statusEl.textContent = "กรุณาใส่ชื่อสินค้า"; return; }
+    const size = document.getElementById("ci-size").value.trim();
     const domain = domainSel.value;
     const price = parseFloat(document.getElementById("ci-price").value) || 0;
     statusEl.textContent = "กำลังเพิ่ม...";
 
-    // find or create the item
-    let { data: item } = await sb.from("ops_items").select("id").eq("name", name).eq("domain", domain).limit(1).maybeSingle();
+    // find or create the item (name + size + domain identify a distinct product)
+    let itemQ = sb.from("ops_items").select("id").eq("name", name).eq("domain", domain);
+    itemQ = size ? itemQ.eq("size", size) : itemQ.is("size", null);
+    let { data: item } = await itemQ.limit(1).maybeSingle();
     if (!item) {
-      const { data: created, error } = await sb.from("ops_items").insert({ domain, name, unit: "ชิ้น" }).select("id").single();
+      const { data: created, error } = await sb.from("ops_items").insert({ domain, name, size: size || null, unit: "ชิ้น" }).select("id").single();
       if (error) { statusEl.textContent = "สร้างสินค้าไม่สำเร็จ: " + error.message; return; }
       item = created;
     }
@@ -207,6 +215,7 @@ async function loadDatalistForDomain(domain) {
     if (phErr) { statusEl.textContent = "บันทึกไม่สำเร็จ: " + phErr.message; return; }
     statusEl.textContent = "เพิ่มเรียบร้อยแล้ว";
     document.getElementById("ci-name").value = "";
+    document.getElementById("ci-size").value = "";
     document.getElementById("ci-price").value = "0";
     loadCatalog();
   });

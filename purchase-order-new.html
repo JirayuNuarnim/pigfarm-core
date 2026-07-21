@@ -64,6 +64,7 @@
             <div style="font-size:13px; font-weight:bold; margin-bottom:6px;">✏️ พิมพ์รายการเอง (กรณีผู้ขายไม่มีในรายการ)</div>
             <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
               <input type="text" id="manual-name" placeholder="พิมพ์ชื่อสินค้า" style="flex:2; min-width:110px; padding:7px 9px; border:1px solid #ccd0d5; border-radius:6px; font-size:14px; font-family:inherit;">
+              <input type="text" id="manual-size" placeholder="ขนาด" style="width:80px; padding:7px 9px; border:1px solid #ccd0d5; border-radius:6px; font-size:14px; font-family:inherit;">
               <select id="manual-domain" style="padding:7px 9px; border:1px solid #ccd0d5; border-radius:6px; font-size:14px; font-family:inherit;"></select>
               <input type="number" step="0.01" id="manual-qty" placeholder="จำนวน" value="1" style="width:70px; padding:7px 9px; border:1px solid #ccd0d5; border-radius:6px; font-size:14px;">
               <input type="number" step="0.01" id="manual-price" placeholder="ราคา" value="0" style="width:70px; padding:7px 9px; border:1px solid #ccd0d5; border-radius:6px; font-size:14px;">
@@ -128,7 +129,7 @@ async function loadCatalog() {
   el.innerHTML = `<p class="muted">กำลังโหลด...</p>`;
   // items this supplier has sold before (latest price per item)
   const { data } = await sb.from("ops_supplier_price_history")
-    .select("item_id, unit_price, purchased_at, ops_items(name, unit, domain)")
+    .select("item_id, unit_price, purchased_at, ops_items(name, unit, domain, size)")
     .eq("supplier_id", SELECTED_SUPPLIER.id)
     .order("purchased_at", { ascending: false });
   const seen = new Set();
@@ -136,7 +137,7 @@ async function loadCatalog() {
   for (const r of (data || [])) {
     if (seen.has(r.item_id)) continue;
     seen.add(r.item_id);
-    items.push({ item_id: r.item_id, price: r.unit_price, name: r.ops_items?.name, unit: r.ops_items?.unit, domain: r.ops_items?.domain });
+    items.push({ item_id: r.item_id, price: r.unit_price, name: r.ops_items?.name, unit: r.ops_items?.unit, domain: r.ops_items?.domain, size: r.ops_items?.size || "" });
   }
   if (!items.length) {
     el.innerHTML = `<p class="muted" style="font-size:13px;">ผู้ขายรายนี้ยังไม่มีประวัติสินค้า — ใช้ช่องค้นหาด้านล่างเพื่อเพิ่มสินค้าลงบิล</p>`;
@@ -144,8 +145,8 @@ async function loadCatalog() {
   }
   el.innerHTML = items.map(it => `
     <div class="catalog-item">
-      <div><div style="font-weight:bold; font-size:14px;">${escapeHtml(it.name)}</div><div class="sub" style="font-size:12px; color:#777;">${DOMAIN_LABELS[it.domain] || it.domain} · ราคาล่าสุด ${formatNumber(it.price)}</div></div>
-      <button class="btn small" onclick='addToBill(${it.item_id}, ${JSON.stringify(it.name)}, ${JSON.stringify(it.unit || "")}, ${JSON.stringify(it.domain)}, ${it.price})'>+ เพิ่ม</button>
+      <div><div style="font-weight:bold; font-size:14px;">${escapeHtml(it.name)}${it.size ? ` <span style="font-weight:normal; color:#c9973a;">(${escapeHtml(it.size)})</span>` : ""}</div><div class="sub" style="font-size:12px; color:#777;">${DOMAIN_LABELS[it.domain] || it.domain} · ราคาล่าสุด ${formatNumber(it.price)}</div></div>
+      <button class="btn small" onclick='addToBill(${it.item_id}, ${JSON.stringify(it.name)}, ${JSON.stringify(it.unit || "")}, ${JSON.stringify(it.domain)}, ${it.price}, ${JSON.stringify(it.size || "")})'>+ เพิ่ม</button>
     </div>
   `).join("");
 }
@@ -154,19 +155,19 @@ async function searchItems() {
   const q = document.getElementById("item-search").value.trim();
   const el = document.getElementById("item-search-results");
   if (!q) { el.innerHTML = ""; return; }
-  const { data } = await sb.from("ops_items").select("id, name, unit, domain").ilike("name", `%${q}%`).limit(20);
+  const { data } = await sb.from("ops_items").select("id, name, unit, domain, size").ilike("name", `%${q}%`).limit(20);
   el.innerHTML = (data || []).map(it => `
     <div class="catalog-item">
-      <div><div style="font-size:14px;">${escapeHtml(it.name)}</div><div class="sub" style="font-size:12px; color:#777;">${DOMAIN_LABELS[it.domain] || it.domain}</div></div>
-      <button class="btn small secondary" onclick='addToBill(${it.id}, ${JSON.stringify(it.name)}, ${JSON.stringify(it.unit || "")}, ${JSON.stringify(it.domain)}, 0)'>+ เพิ่ม</button>
+      <div><div style="font-size:14px;">${escapeHtml(it.name)}${it.size ? ` <span style="color:#c9973a;">(${escapeHtml(it.size)})</span>` : ""}</div><div class="sub" style="font-size:12px; color:#777;">${DOMAIN_LABELS[it.domain] || it.domain}</div></div>
+      <button class="btn small secondary" onclick='addToBill(${it.id}, ${JSON.stringify(it.name)}, ${JSON.stringify(it.unit || "")}, ${JSON.stringify(it.domain)}, 0, ${JSON.stringify(it.size || "")})'>+ เพิ่ม</button>
     </div>
   `).join("");
 }
 
-function addToBill(itemId, name, unit, domain, price) {
-  const existing = BILL.find(b => b.item_id === itemId);
+function addToBill(itemId, name, unit, domain, price, size) {
+  const existing = itemId ? BILL.find(b => b.item_id === itemId) : null;
   if (existing) { existing.qty += 1; }
-  else BILL.push({ item_id: itemId, name, unit, domain, qty: 1, price: price || 0 });
+  else BILL.push({ item_id: itemId, name, unit, domain, qty: 1, price: price || 0, size: size || "" });
   renderBill();
 }
 
@@ -178,7 +179,7 @@ function renderBill() {
   if (!BILL.length) { tbody.innerHTML = `<tr><td colspan="5" class="muted" style="padding:12px;">ยังไม่มีรายการ — เลือกจากช่อง 3 ด้านขวา</td></tr>`; document.getElementById("grand-total").textContent = "0.00"; return; }
   tbody.innerHTML = BILL.map((b, i) => `
     <tr class="bill-line">
-      <td>${escapeHtml(b.name)}<div style="font-size:11px; color:#999;">${DOMAIN_LABELS[b.domain] || b.domain} ${escapeHtml(b.unit || "")}</div></td>
+      <td>${escapeHtml(b.name)}${b.size ? ` <span style="color:#c9973a;">(${escapeHtml(b.size)})</span>` : ""}<div style="font-size:11px; color:#999;">${DOMAIN_LABELS[b.domain] || b.domain} ${escapeHtml(b.unit || "")}</div></td>
       <td><input type="number" step="0.01" class="mini" value="${b.qty}" onchange="updateBillLine(${i}, 'qty', this.value)"></td>
       <td><input type="number" step="0.01" class="mini" value="${b.price}" onchange="updateBillLine(${i}, 'price', this.value)"></td>
       <td class="text-right">${formatNumber(b.qty * b.price)}</td>
@@ -204,11 +205,13 @@ function renderBill() {
   document.getElementById("manual-add-btn").addEventListener("click", () => {
     const name = document.getElementById("manual-name").value.trim();
     if (!name) { document.getElementById("manual-name").focus(); return; }
+    const size = document.getElementById("manual-size").value.trim();
     const domain = document.getElementById("manual-domain").value;
     const qty = parseFloat(document.getElementById("manual-qty").value) || 1;
     const price = parseFloat(document.getElementById("manual-price").value) || 0;
-    BILL.push({ item_id: null, name, unit: "", domain, qty, price });
+    BILL.push({ item_id: null, name, unit: "", domain, qty, price, size });
     document.getElementById("manual-name").value = "";
+    document.getElementById("manual-size").value = "";
     document.getElementById("manual-qty").value = "1";
     document.getElementById("manual-price").value = "0";
     renderBill();
@@ -232,9 +235,12 @@ function renderBill() {
 
   async function resolveItemId(b) {
     if (b.item_id) return b.item_id;
-    const { data: existing } = await sb.from("ops_items").select("id").eq("name", b.name).eq("domain", b.domain).limit(1).maybeSingle();
+    const size = (b.size || "").trim();
+    let q = sb.from("ops_items").select("id").eq("name", b.name).eq("domain", b.domain);
+    q = size ? q.eq("size", size) : q.is("size", null);
+    const { data: existing } = await q.limit(1).maybeSingle();
     if (existing) return existing.id;
-    const { data: created } = await sb.from("ops_items").insert({ domain: b.domain, name: b.name, unit: b.unit || "ชิ้น" }).select("id").single();
+    const { data: created } = await sb.from("ops_items").insert({ domain: b.domain, name: b.name, size: size || null, unit: b.unit || "ชิ้น" }).select("id").single();
     return created ? created.id : null;
   }
 
@@ -279,7 +285,7 @@ function renderBill() {
       }).select().single();
       if (error) { statusEl.textContent = "บันทึกไม่สำเร็จ: " + error.message; return; }
       const items = byDomain[domain].map(b => ({
-        request_id: req.id, item_id: b.resolvedId, description: b.name, qty: b.qty, unit: b.unit, unit_price: b.price,
+        request_id: req.id, item_id: b.resolvedId, description: b.size ? `${b.name} (${b.size})` : b.name, qty: b.qty, unit: b.unit, unit_price: b.price,
       }));
       await sb.from("ops_purchase_request_items").insert(items);
       createdDocs.push({ id: req.id, doc_no: docNo });
