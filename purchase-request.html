@@ -52,6 +52,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="shared/supabase-client.js"></script>
 <script src="shared/auth-guard.js"></script>
+<script src="shared/lightbox.js"></script>
 <script>
 const params = new URLSearchParams(window.location.search);
 const requestId = params.get("id");
@@ -359,11 +360,16 @@ async function renderAttachments(userId) {
       </div>`;
   }).join("");
 
-  // load thumbnail signed URLs
-  for (const img of container.querySelectorAll("img[data-path]")) {
+  // load thumbnail signed URLs; clicking any opens the full-screen viewer with all attachments
+  const imgs = [...container.querySelectorAll("img[data-path]")];
+  const signed = [];
+  for (const img of imgs) {
     const { data } = await sb.storage.from("ops-attachments").createSignedUrl(img.dataset.path, 600);
-    if (data?.signedUrl) { img.src = data.signedUrl; img.onclick = () => window.open(data.signedUrl, "_blank"); }
+    const url = data?.signedUrl || "";
+    signed.push(url);
+    if (url) img.src = url;
   }
+  imgs.forEach((img, i) => { img.style.cursor = "pointer"; img.onclick = () => openLightbox(signed, i); });
 
   container.querySelectorAll(".att-upload").forEach(btn => btn.addEventListener("click", async () => {
     const kind = btn.dataset.kind;

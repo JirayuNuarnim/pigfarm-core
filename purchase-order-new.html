@@ -132,6 +132,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="shared/supabase-client.js"></script>
 <script src="shared/auth-guard.js"></script>
+<script src="shared/lightbox.js"></script>
 <script>
 let SUPPLIERS = [];
 let SELECTED_SUPPLIER = null;
@@ -273,11 +274,12 @@ function renderAttachedDocs() {
     el.innerHTML = `<div class="qt-empty">ยังไม่มีเอกสารแนบ — แนบรูปใบเสนอราคา/เทียบราคา (จากหลายบริษัท) ที่ช่อง ⚖️ ในบิลด้านล่าง แล้วจะมาแสดงที่นี่ให้เจ้าของพิจารณา</div>`;
     return;
   }
-  el.innerHTML = `<div class="qt-gallery">` + files.map(f => {
+  el.innerHTML = `<div class="qt-gallery">` + files.map((f, i) => {
     const url = URL.createObjectURL(f);
     ATTACHED_URLS.push(url);
-    return `<div class="qt-thumb"><img src="${url}" title="${escapeHtml(f.name)}" onclick="window.open('${url}','_blank')"><div class="nm">${escapeHtml(f.name)}</div></div>`;
+    return `<div class="qt-thumb"><img src="${url}" title="${escapeHtml(f.name)}" data-i="${i}"><div class="nm">${escapeHtml(f.name)}</div></div>`;
   }).join("") + `</div>`;
+  el.querySelectorAll(".qt-thumb img").forEach(img => img.addEventListener("click", () => openLightbox(ATTACHED_URLS, +img.dataset.i)));
 }
 
 (async () => {
