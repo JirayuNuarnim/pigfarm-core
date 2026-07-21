@@ -73,6 +73,14 @@
           </div>
           <div style="text-align:right; font-size:18px; font-weight:bold; margin:12px 0;">รวมทั้งหมด <span id="grand-total">0.00</span> บาท</div>
           <div class="field"><label>หมายเหตุ</label><textarea id="note" class="flat-input" rows="2"></textarea></div>
+
+          <div style="border:1px solid #d85a30; border-radius:8px; padding:12px; margin-bottom:12px; background:#fff7f3;">
+            <div style="font-weight:bold; margin-bottom:4px;">⚖️ ใบเทียบราคา (จำเป็นต้องแนบ)</div>
+            <div class="muted" style="font-size:13px; margin-bottom:8px;">สแกน/ถ่ายรูปเอกสารใบเทียบราคาแนบมาด้วยทุกครั้ง (แนบได้หลายรูป)</div>
+            <input type="file" id="price-compare-files" accept="image/*" capture="environment" multiple>
+            <div id="pc-preview" class="muted" style="font-size:13px; margin-top:6px;"></div>
+          </div>
+
           <button class="btn" id="save-btn" style="width:100%;">บันทึกใบขอซื้อ (ส่งเข้าศูนย์กลาง)</button>
           <div id="save-status" class="muted" style="margin-top:8px;"></div>
         </div>
@@ -258,9 +266,17 @@ function renderBill() {
     }
   }
 
+  document.getElementById("price-compare-files").addEventListener("change", (e) => {
+    const files = [...e.target.files];
+    document.getElementById("pc-preview").textContent = files.length ? ("เลือกแล้ว " + files.length + " รูป: " + files.map(f => f.name).join(", ")) : "";
+  });
+
   document.getElementById("save-btn").addEventListener("click", async () => {
     const statusEl = document.getElementById("save-status");
     if (!BILL.length) { statusEl.textContent = "กรุณาเพิ่มรายการอย่างน้อย 1 รายการ"; return; }
+    const pcFiles = [...document.getElementById("price-compare-files").files];
+    if (!pcFiles.length) { statusEl.textContent = "⚖️ กรุณาแนบใบเทียบราคา (สแกน/ถ่ายรูป) อย่างน้อย 1 รูป"; document.getElementById("price-compare-files").focus(); return; }
+    const userId = (await sb.auth.getUser()).data.user.id;
     const farm = farmSel.value;
     const requestedBy = document.getElementById("requested-by").value.trim();
     const note = document.getElementById("note").value.trim();
@@ -290,6 +306,23 @@ function renderBill() {
       await sb.from("ops_purchase_request_items").insert(items);
       createdDocs.push({ id: req.id, doc_no: docNo });
     }
+
+    // upload the scanned price-comparison document(s) to each created request
+    statusEl.textContent = "กำลังอัปโหลดใบเทียบราคา...";
+    for (const doc of createdDocs) {
+      for (let i = 0; i < pcFiles.length; i++) {
+        const file = pcFiles[i];
+        const safeName = file.name.replace(/[^\w.\-]/g, "_");
+        const path = `purchase/${doc.id}/price_compare-${todayISO()}-${i}-${safeName}`;
+        const { error: upErr } = await sb.storage.from("ops-attachments").upload(path, file);
+        if (upErr) { statusEl.textContent = "อัปโหลดใบเทียบราคาไม่สำเร็จ: " + upErr.message; return; }
+        await sb.from("ops_attachments").insert({
+          entity_type: "purchase_request", entity_id: doc.id, storage_path: path,
+          kind: "price_compare", note: "ใบเทียบราคา", uploaded_by: userId,
+        });
+      }
+    }
+
     if (createdDocs.length === 1) { window.location.href = `purchase-request.html?id=${createdDocs[0].id}`; }
     else { statusEl.innerHTML = "สร้างใบขอซื้อ " + createdDocs.length + " ใบ (แยกตามหมวด): " + createdDocs.map(d => `<a class="link" href="purchase-request.html?id=${d.id}">${d.doc_no}</a>`).join(", "); BILL = []; renderBill(); }
   });
