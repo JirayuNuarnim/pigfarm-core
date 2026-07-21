@@ -6,7 +6,8 @@
 <title>สร้างใบขอซื้อ - THE CORE</title>
 <link rel="stylesheet" href="shared/style.css">
 <style>
-  .order-grid { display: grid; grid-template-columns: 300px 1fr 320px; gap: 16px; align-items: start; }
+  body[data-page] .content { max-width: none; }
+  .order-grid { display: grid; grid-template-columns: 320px minmax(0, 1.4fr) minmax(0, 1fr); gap: 16px; align-items: start; }
   @media (max-width: 1100px) { .order-grid { grid-template-columns: 1fr; } }
   .panel { border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.1); background: #fff; }
   .panel-head { padding: 12px 16px; color: #fff; font-weight: bold; font-size: 15px; display:flex; justify-content:space-between; align-items:center; }
@@ -229,6 +230,28 @@ function renderBill() {
     SUPPLIERS.push(data); renderSuppliers();
   });
 
+  async function resolveItemId(b) {
+    if (b.item_id) return b.item_id;
+    const { data: existing } = await sb.from("ops_items").select("id").eq("name", b.name).eq("domain", b.domain).limit(1).maybeSingle();
+    if (existing) return existing.id;
+    const { data: created } = await sb.from("ops_items").insert({ domain: b.domain, name: b.name, unit: b.unit || "ชิ้น" }).select("id").single();
+    return created ? created.id : null;
+  }
+
+  // Add the item to this supplier's catalog (price history) so it appears in
+  // "สินค้าที่ผู้ขายมี" next time. Only writes when new to the supplier or the price changed.
+  async function recordSupplierCatalog(supplierId, itemId, price) {
+    if (!supplierId || !itemId) return;
+    const { data: last } = await sb.from("ops_supplier_price_history")
+      .select("unit_price").eq("supplier_id", supplierId).eq("item_id", itemId)
+      .order("purchased_at", { ascending: false }).limit(1).maybeSingle();
+    if (!last) {
+      await sb.from("ops_supplier_price_history").insert({ supplier_id: supplierId, item_id: itemId, unit_price: price || 0, purchased_at: todayISO(), note: "เพิ่มจากใบขอซื้อ" });
+    } else if (price > 0 && Number(last.unit_price) !== Number(price)) {
+      await sb.from("ops_supplier_price_history").insert({ supplier_id: supplierId, item_id: itemId, unit_price: price, purchased_at: todayISO(), note: "อัปเดตราคาจากใบขอซื้อ" });
+    }
+  }
+
   document.getElementById("save-btn").addEventListener("click", async () => {
     const statusEl = document.getElementById("save-status");
     if (!BILL.length) { statusEl.textContent = "กรุณาเพิ่มรายการอย่างน้อย 1 รายการ"; return; }
@@ -237,11 +260,17 @@ function renderBill() {
     const note = document.getElementById("note").value.trim();
     const supplierId = SELECTED_SUPPLIER ? SELECTED_SUPPLIER.id : null;
 
+    statusEl.textContent = "กำลังบันทึก...";
+    // resolve/create catalog items for typed-in names, and add them to this supplier's catalog
+    for (const b of BILL) {
+      b.resolvedId = await resolveItemId(b);
+      if (supplierId) await recordSupplierCatalog(supplierId, b.resolvedId, b.price);
+    }
+
     // group bill items by domain -> one PR per domain
     const byDomain = {};
     for (const b of BILL) { (byDomain[b.domain] = byDomain[b.domain] || []).push(b); }
 
-    statusEl.textContent = "กำลังบันทึก...";
     const createdDocs = [];
     for (const domain of Object.keys(byDomain)) {
       const { data: docNo } = await sb.rpc("ops_next_doc_no", { p_doc_type: "purchase", p_farm: farm });
@@ -250,7 +279,7 @@ function renderBill() {
       }).select().single();
       if (error) { statusEl.textContent = "บันทึกไม่สำเร็จ: " + error.message; return; }
       const items = byDomain[domain].map(b => ({
-        request_id: req.id, item_id: b.item_id, description: b.name, qty: b.qty, unit: b.unit, unit_price: b.price,
+        request_id: req.id, item_id: b.resolvedId, description: b.name, qty: b.qty, unit: b.unit, unit_price: b.price,
       }));
       await sb.from("ops_purchase_request_items").insert(items);
       createdDocs.push({ id: req.id, doc_no: docNo });
