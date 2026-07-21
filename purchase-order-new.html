@@ -25,6 +25,22 @@
   .bill-line td { padding:5px 6px; }
   .mini { width:70px; padding:5px 6px; }
   .flat-input { width:100%; padding:8px 10px; border:1px solid #ccd0d5; border-radius:6px; font-size:14px; margin-bottom:10px; font-family:inherit; }
+  .preview-row { display:grid; grid-template-columns: 1.15fr 1fr; gap:16px; margin-bottom:16px; align-items:start; }
+  @media (max-width: 1100px) { .preview-row { grid-template-columns: 1fr; } }
+  .pv .panel-head { background:#2b6cb0; }
+  .qt .panel-head { background:#7c5cbf; }
+  .doc-mini { background:#fff; border:1px solid #e3e7e4; border-radius:8px; padding:16px 20px; color:#000; box-shadow: inset 0 0 0 1px #f0f0f0; }
+  .doc-mini .m-company { text-align:center; font-weight:bold; font-size:16px; }
+  .doc-mini .m-title { text-align:center; font-weight:bold; font-size:15px; text-decoration:underline; margin:4px 0 10px; }
+  .doc-mini .m-meta { display:flex; justify-content:space-between; font-size:12.5px; margin-bottom:8px; line-height:1.5; }
+  .doc-mini table { width:100%; border-collapse:collapse; }
+  .doc-mini th, .doc-mini td { border:1px solid #333; padding:3px 6px; font-size:12.5px; }
+  .doc-mini th { background:#eee; }
+  .doc-mini .m-total { text-align:right; font-weight:bold; margin-top:6px; font-size:14px; }
+  .qt-gallery { display:grid; grid-template-columns:repeat(auto-fill, minmax(96px,1fr)); gap:8px; }
+  .qt-thumb img { width:100%; height:96px; object-fit:cover; border-radius:6px; border:1px solid #ddd; cursor:pointer; background:#f4f4f4; }
+  .qt-thumb .nm { font-size:10px; color:#888; text-align:center; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .qt-empty { color:#999; font-size:13px; }
 </style>
 </head>
 <body data-page="purchase-request">
@@ -34,6 +50,18 @@
     <div class="page-header">
       <div><h1>สร้างใบขอซื้อ (Dashboard)</h1><p class="subtitle">เลือกผู้ขาย → เลือกสินค้าที่เขามี → สร้างบิลส่งเข้าศูนย์กลาง</p></div>
       <a class="btn secondary" href="purchase-request.html">← กลับรายการใบขอซื้อ</a>
+    </div>
+
+    <!-- TOP ROW: live document preview (left) + attached quotation docs (right) -->
+    <div class="preview-row">
+      <div class="panel pv">
+        <div class="panel-head">👁️ ตัวอย่างเอกสาร (เรียลไทม์)</div>
+        <div class="panel-body"><div id="doc-preview"></div></div>
+      </div>
+      <div class="panel qt">
+        <div class="panel-head">📑 ใบเสนอราคาที่แนบ (ให้เจ้าของพิจารณา)</div>
+        <div class="panel-body"><div id="attached-docs"></div></div>
+      </div>
     </div>
 
     <div class="order-grid">
@@ -126,6 +154,7 @@ async function selectSupplier(id) {
   SELECTED_SUPPLIER = SUPPLIERS.find(s => s.id === id);
   document.getElementById("bill-supplier").value = SELECTED_SUPPLIER ? SELECTED_SUPPLIER.name : "";
   renderSuppliers();
+  renderPreview();
   await loadCatalog();
 }
 
@@ -195,6 +224,60 @@ function renderBill() {
     </tr>
   `).join("");
   document.getElementById("grand-total").textContent = formatNumber(BILL.reduce((s, b) => s + b.qty * b.price, 0));
+  renderPreview();
+}
+
+// live preview of the purchase-order document (top-left)
+function renderPreview() {
+  const el = document.getElementById("doc-preview");
+  if (!el) return;
+  const farm = document.getElementById("farm").value || "-";
+  const supplier = document.getElementById("bill-supplier").value || "-";
+  const requestedBy = document.getElementById("requested-by").value || "-";
+  const note = document.getElementById("note").value || "";
+  const dateStr = new Date().toLocaleDateString("th-TH");
+  const rows = BILL.map((b, i) => `<tr>
+    <td style="text-align:center;">${i + 1}</td>
+    <td>${escapeHtml(b.name)}${b.size ? ` (${escapeHtml(b.size)})` : ""}</td>
+    <td style="text-align:right;">${formatNumber(b.qty, 0)}</td>
+    <td style="text-align:right;">${formatNumber(b.price)}</td>
+    <td style="text-align:right;">${formatNumber(b.qty * b.price)}</td></tr>`).join("");
+  const total = BILL.reduce((s, b) => s + b.qty * b.price, 0);
+  el.innerHTML = `
+    <div class="doc-mini">
+      <div class="m-company">บริษัท เอสเจเอฟ ฟาร์ม จำกัด</div>
+      <div class="m-title">ใบขอซื้อวัสดุอุปกรณ์</div>
+      <div class="m-meta">
+        <div>เลขที่: <i style="color:#888;">(ออกเลขเมื่อบันทึก)</i><br>ฟาร์ม: ${escapeHtml(farm)}<br>ผู้ขาย: ${escapeHtml(supplier)}</div>
+        <div style="text-align:right;">วันที่: ${dateStr}<br>ผู้ขอ: ${escapeHtml(requestedBy)}</div>
+      </div>
+      <table>
+        <thead><tr><th style="width:28px;">#</th><th>รายการ</th><th style="width:52px;">จำนวน</th><th style="width:64px;">ราคา</th><th style="width:72px;">รวม</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="5" style="text-align:center; color:#999; padding:10px;">— ยังไม่มีรายการ —</td></tr>`}</tbody>
+      </table>
+      <div class="m-total">รวมเป็นเงิน ${formatNumber(total)} บาท</div>
+      ${note ? `<div style="font-size:12px; margin-top:6px;">หมายเหตุ: ${escapeHtml(note)}</div>` : ""}
+    </div>`;
+}
+
+// gallery of attached quotation/price-comparison photos (top-right)
+let ATTACHED_URLS = [];
+function renderAttachedDocs() {
+  const input = document.getElementById("price-compare-files");
+  const el = document.getElementById("attached-docs");
+  if (!input || !el) return;
+  const files = [...input.files];
+  ATTACHED_URLS.forEach(u => URL.revokeObjectURL(u));
+  ATTACHED_URLS = [];
+  if (!files.length) {
+    el.innerHTML = `<div class="qt-empty">ยังไม่มีเอกสารแนบ — แนบรูปใบเสนอราคา/เทียบราคา (จากหลายบริษัท) ที่ช่อง ⚖️ ในบิลด้านล่าง แล้วจะมาแสดงที่นี่ให้เจ้าของพิจารณา</div>`;
+    return;
+  }
+  el.innerHTML = `<div class="qt-gallery">` + files.map(f => {
+    const url = URL.createObjectURL(f);
+    ATTACHED_URLS.push(url);
+    return `<div class="qt-thumb"><img src="${url}" title="${escapeHtml(f.name)}" onclick="window.open('${url}','_blank')"><div class="nm">${escapeHtml(f.name)}</div></div>`;
+  }).join("") + `</div>`;
 }
 
 (async () => {
@@ -269,7 +352,15 @@ function renderBill() {
   document.getElementById("price-compare-files").addEventListener("change", (e) => {
     const files = [...e.target.files];
     document.getElementById("pc-preview").textContent = files.length ? ("เลือกแล้ว " + files.length + " รูป: " + files.map(f => f.name).join(", ")) : "";
+    renderAttachedDocs();
   });
+
+  // keep the live document preview in sync as fields change
+  document.getElementById("farm").addEventListener("change", renderPreview);
+  document.getElementById("requested-by").addEventListener("input", renderPreview);
+  document.getElementById("note").addEventListener("input", renderPreview);
+  renderPreview();
+  renderAttachedDocs();
 
   document.getElementById("save-btn").addEventListener("click", async () => {
     const statusEl = document.getElementById("save-status");
