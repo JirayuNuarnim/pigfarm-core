@@ -35,7 +35,7 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opa
 .sidebar a { color: #b7c3e0; text-decoration: none; padding: 11px 20px; font-size: 14.5px; border-left:2px solid transparent; }
 .sidebar a:hover { background: var(--glass); color: #fff; }
 .sidebar a.active { background: linear-gradient(90deg,rgba(47,224,207,.14),transparent); color: #fff; font-weight: 700; border-left-color:var(--cyan); }
-.content { flex: 1; padding: 24px 32px; max-width: 1280px; min-width: 0; }
+.content { flex: 1; padding: 24px 32px; min-width: 0; }
 
 h1 { font-size: 22px; margin: 0 0 4px; }
 h2 { font-size: 18px; margin: 24px 0 10px; }
