@@ -24,6 +24,19 @@
   .bar-track { flex: 1; background: #eef1ef; border-radius: 6px; height: 20px; overflow: hidden; }
   .bar-fill { background: #1d9e75; height: 100%; border-radius: 6px; min-width: 2px; }
   .bar-val { width: 104px; text-align: right; font-size: 13px; flex: 0 0 auto; }
+  /* ---- readability ---- */
+  .stat .val { font-size: 28px; }
+  .card table th, .card table td { border: none; border-bottom: 1px solid #edf0ee; padding: 12px 14px; font-size: 15px; vertical-align: middle; }
+  .card table thead th { background: #eef4f1; color: #294a39; font-weight: bold; border-bottom: 2px solid #cfd8d3; }
+  #rows tr:nth-child(even) td { background: #f8faf9; }
+  #rows tr:hover td { background: #eaf6f0; }
+  #rows td:first-child { font-weight: bold; }
+  #rows td:nth-child(6) { font-weight: bold; font-size: 16px; color: #1d9e75; font-variant-numeric: tabular-nums; }
+  .badge { padding: 3px 10px; border-radius: 12px; font-size: 13px; }
+  .bar-track { height: 24px; }
+  .bar-lbl { width: 110px; font-size: 14px; }
+  .bar-val { width: 118px; font-size: 14px; font-weight: bold; font-variant-numeric: tabular-nums; }
+  .chart-grid { gap: 28px; }
   @media print {
     .stat { break-inside: avoid; }
     table { font-size: 12px; }
