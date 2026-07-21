@@ -506,7 +506,7 @@ async function renderDetail() {
         const min = entries.length ? Math.min(...entries.map(([, p]) => p)) : null;
         const minVi = entries.find(([, p]) => p === min)?.[0];
         html += `<tr><td>${escapeHtml(row.name)}${row.size ? ` (${escapeHtml(row.size)})` : ""}</td>` +
-          vendors.map((v, vi) => { const p = row.prices[vi]; const isMin = p != null && p === min; return `<td class="text-right"${isMin ? ' style="background:#e1f5ee; font-weight:bold; color:#1d9e75;"' : ""}>${p != null ? formatNumber(p) : "-"}</td>`; }).join("") +
+          vendors.map((v, vi) => { const p = row.prices[vi]; const isMin = p != null && p === min; return `<td class="text-right"${isMin ? ' style="background:rgba(56,224,138,.16); font-weight:bold; color:var(--green);"' : ""}>${p != null ? formatNumber(p) : "-"}</td>`; }).join("") +
           `<td>${min != null ? `${escapeHtml(vendors[minVi])} @ ${formatNumber(min)}` : "-"}</td>` +
           (canEdit ? `<td><button class="btn small ai-fill-btn" data-name="${escapeHtml(row.name)}" data-size="${escapeHtml(row.size)}" data-price="${min != null ? min : 0}">➕ เติมลงใบ</button></td>` : "") +
           `</tr>`;
