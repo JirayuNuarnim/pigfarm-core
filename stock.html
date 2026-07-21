@@ -8,15 +8,15 @@
 <style>
   .domain-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px; }
   .domain-card {
-    background: #fff; border-radius: 12px; padding: 28px 24px; text-decoration: none; color: inherit;
-    box-shadow: 0 1px 3px rgba(0,0,0,.08); border: 1px solid #e3e7e4; transition: box-shadow .15s, transform .15s;
+    background: var(--panel); border-radius: 14px; padding: 28px 24px; text-decoration: none; color: var(--text);
+    box-shadow: 0 1px 3px rgba(0,0,0,.3); border: 1px solid var(--stroke); transition: .15s;
     display: block;
   }
-  .domain-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,.12); transform: translateY(-2px); }
+  .domain-card:hover { border-color: var(--cyan); transform: translateY(-2px); box-shadow: 0 10px 30px -14px rgba(47,224,207,.5); }
   .domain-card .icon { font-size: 40px; margin-bottom: 10px; }
   .domain-card .name { font-size: 20px; font-weight: bold; margin-bottom: 6px; }
-  .domain-card .count { color: #3a6b4c; font-size: 15px; }
-  .domain-card .go { color: #888; font-size: 13px; margin-top: 12px; }
+  .domain-card .count { color: var(--cyan); font-size: 15px; }
+  .domain-card .go { color: var(--muted); font-size: 13px; margin-top: 12px; }
 </style>
 </head>
 <body data-page="stock">
