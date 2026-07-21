@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>รายละเอียดยา - THE CORE</title>
+<link rel="stylesheet" href="shared/style.css">
+</head>
+<body data-page="stock">
+<div class="layout">
+  <nav id="nav-root" class="sidebar no-print"></nav>
+  <main class="content">
+    <div class="page-header">
+      <div>
+        <p style="margin:0;"><a class="link" id="back-link" href="stock-medicine.html">&larr; กลับคลังยา</a></p>
+        <h1 id="item-name">-</h1>
+        <p class="subtitle" id="item-meta"></p>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>ล็อตคงเหลือ (แยกตามบริษัท / วันหมดอายุ)</h2>
+      <table>
+        <thead><tr><th>บริษัท</th><th>คงเหลือ</th><th>ราคา/หน่วย</th><th>มูลค่า</th><th>วันหมดอายุ</th><th>หมายเหตุ</th><th class="admin-col"></th></tr></thead>
+        <tbody id="lot-rows"><tr><td colspan="7" class="muted">กำลังโหลด...</td></tr></tbody>
+      </table>
+      <div id="add-lot-area" style="display:none; margin-top:14px;">
+        <h3 style="margin-bottom:8px;">+ เพิ่มล็อตใหม่</h3>
+        <form id="lot-form" class="row" style="flex-wrap:wrap; align-items:end; gap:10px;">
+          <div class="field" style="margin:0;"><label>บริษัท/ผู้ขาย</label><input type="text" id="lot-supplier"></div>
+          <div class="field" style="margin:0;"><label>จำนวน</label><input type="number" step="0.01" id="lot-qty" required></div>
+          <div class="field" style="margin:0;"><label>ราคา/หน่วย</label><input type="number" step="0.01" id="lot-price" value="0"></div>
+          <div class="field" style="margin:0;"><label>วันหมดอายุ</label><input type="date" id="lot-expiry"></div>
+          <div class="field" style="margin:0;"><label>หมายเหตุ (เลขล็อต ฯลฯ)</label><input type="text" id="lot-note"></div>
+          <div class="field" style="margin:0;"><button class="btn" type="submit">เพิ่ม</button></div>
+        </form>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>บันทึกเบิกจ่าย (ตัดสต็อก)</h2>
+      <p class="muted">เลือกล็อตที่จะเบิก แล้วใส่จำนวนที่เบิกออก ระบบจะลดคงเหลือของล็อตนั้น</p>
+      <form id="issue-form" class="row" style="flex-wrap:wrap; align-items:end; gap:10px;">
+        <div class="field" style="margin:0; min-width:220px;"><label>ล็อตที่เบิก</label><select id="issue-lot"></select></div>
+        <div class="field" style="margin:0;"><label>จำนวนที่เบิกออก</label><input type="number" step="0.01" id="issue-qty" required></div>
+        <div class="field" style="margin:0;"><button class="btn" type="submit">บันทึกเบิกจ่าย</button></div>
+        <span id="issue-status" class="muted"></span>
+      </form>
+    </div>
+  </main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="shared/supabase-client.js"></script>
+<script src="shared/auth-guard.js"></script>
+<script>
+const params = new URLSearchParams(window.location.search);
+const itemId = params.get("item");
+const farm = params.get("farm");
+let CAN_EDIT = false;
+let ITEM = null;
+let LOTS = [];
+
+function fmtDate(d) { return d ? new Date(d + "T00:00:00").toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" }) : "-"; }
+function daysUntil(d) { return d ? Math.round((new Date(d + "T00:00:00") - new Date()) / 86400000) : Infinity; }
+
+async function loadLots() {
+  const { data } = await sb.from("ops_lots").select("*").eq("item_id", itemId).eq("location", farm).order("expiry_date", { nullsFirst: false });
+  LOTS = data || [];
+  const tbody = document.getElementById("lot-rows");
+  if (!LOTS.length) { tbody.innerHTML = `<tr><td colspan="7" class="muted">ยังไม่มีล็อต</td></tr>`; }
+  else {
+    tbody.innerHTML = LOTS.map(l => {
+      const d = daysUntil(l.expiry_date);
+      let badge = "";
+      if (l.expiry_date && d >= 0 && d <= 90) badge = ' <span class="badge warn">ใกล้หมดอายุ</span>';
+      else if (l.expiry_date && d < 0) badge = ' <span class="badge danger">หมดอายุแล้ว</span>';
+      return `<tr>
+        <td>${escapeHtml(l.supplier || "-")}</td>
+        <td class="text-right">${formatNumber(l.qty, 0)} ${escapeHtml(l.unit)}</td>
+        <td class="text-right">${formatNumber(l.unit_price)}</td>
+        <td class="text-right">${formatNumber(l.qty * l.unit_price, 0)}</td>
+        <td>${fmtDate(l.expiry_date)}${badge}</td>
+        <td>${escapeHtml(l.note || "")}</td>
+        ${CAN_EDIT ? `<td><button class="btn danger small" onclick="delLot(${l.id})">ลบ</button></td>` : '<td></td>'}
+      </tr>`;
+    }).join("");
+  }
+  // refresh issue-lot dropdown
+  const sel = document.getElementById("issue-lot");
+  sel.innerHTML = LOTS.filter(l => l.qty > 0).map(l =>
+    `<option value="${l.id}">${escapeHtml(l.supplier || "ล็อต")} · เหลือ ${formatNumber(l.qty, 0)} ${escapeHtml(l.unit)}${l.expiry_date ? " · หมดอายุ " + fmtDate(l.expiry_date) : ""}</option>`
+  ).join("");
+}
+
+async function delLot(id) { if (confirm("ลบล็อตนี้?")) { await sb.from("ops_lots").delete().eq("id", id); loadLots(); } }
+
+(async () => {
+  const user = await requireAuth();
+  if (!user) return;
+  CAN_EDIT = isOwner() || isCentral() || (myDomains().includes("medicine") && (canSeeAllFarms() || myFarms().includes(farm)));
+
+  document.getElementById("back-link").href = `stock-medicine.html`;
+  const { data: item } = await sb.from("ops_items").select("*").eq("id", itemId).single();
+  if (!item) { document.getElementById("item-name").textContent = "ไม่พบยา"; return; }
+  ITEM = item;
+  document.getElementById("item-name").textContent = item.name;
+  document.getElementById("item-meta").textContent = `คลังยา · ฟาร์ม ${farm} · หน่วย ${item.unit}`;
+
+  if (CAN_EDIT) document.getElementById("add-lot-area").style.display = "block";
+  document.querySelectorAll(".admin-col").forEach(el => { if (!CAN_EDIT) el.style.display = "none"; });
+
+  await loadLots();
+
+  document.getElementById("lot-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const { error } = await sb.from("ops_lots").insert({
+      item_id: itemId, location: farm,
+      supplier: document.getElementById("lot-supplier").value.trim(),
+      qty: parseFloat(document.getElementById("lot-qty").value) || 0,
+      unit: item.unit,
+      unit_price: parseFloat(document.getElementById("lot-price").value) || 0,
+      expiry_date: document.getElementById("lot-expiry").value || null,
+      note: document.getElementById("lot-note").value.trim(),
+      created_by: user.user_id,
+    });
+    if (error) { alert("บันทึกไม่สำเร็จ: " + error.message); return; }
+    document.getElementById("lot-form").reset();
+    loadLots();
+  });
+
+  document.getElementById("issue-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const statusEl = document.getElementById("issue-status");
+    const lotId = document.getElementById("issue-lot").value;
+    const issueQty = parseFloat(document.getElementById("issue-qty").value) || 0;
+    if (!lotId) { statusEl.textContent = "ไม่มีล็อตให้เบิก"; return; }
+    const lot = LOTS.find(l => String(l.id) === String(lotId));
+    if (!lot) return;
+    if (issueQty <= 0) { statusEl.textContent = "จำนวนไม่ถูกต้อง"; return; }
+    if (issueQty > Number(lot.qty)) { statusEl.textContent = "เบิกเกินยอดคงเหลือของล็อต"; return; }
+    const { error } = await sb.from("ops_lots").update({ qty: Number(lot.qty) - issueQty, updated_at: new Date().toISOString() }).eq("id", lotId);
+    if (error) { statusEl.textContent = "บันทึกไม่สำเร็จ: " + error.message; return; }
+    statusEl.textContent = "เบิกจ่ายเรียบร้อยแล้ว";
+    document.getElementById("issue-form").reset();
+    loadLots();
+  });
+})();
+</script>
+</body>
+</html>
