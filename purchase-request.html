@@ -5,6 +5,23 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ใบขอซื้อ - THE CORE</title>
 <link rel="stylesheet" href="shared/style.css">
+<style>
+  .stage-tabs { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
+  .stage-tab { border:1px solid #d9ddda; background:#fff; border-radius:20px; padding:7px 14px; cursor:pointer; font-size:14px; display:flex; align-items:center; gap:6px; }
+  .stage-tab:hover { border-color:#1d9e75; }
+  .stage-tab.active { background:#1d9e75; color:#fff; border-color:#1d9e75; }
+  .stage-tab .cnt { background:rgba(0,0,0,.08); border-radius:10px; padding:0 7px; font-size:12px; font-weight:bold; }
+  .stage-tab.active .cnt { background:rgba(255,255,255,.25); }
+  .att-cat { border:1px solid #e3e7e4; border-radius:10px; padding:12px; margin-bottom:12px; }
+  .att-cat h3 { margin:0 0 8px; font-size:15px; }
+  .att-thumbs { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px; }
+  .att-thumb { position:relative; width:96px; }
+  .att-thumb img { width:96px; height:96px; object-fit:cover; border-radius:8px; border:1px solid #ddd; cursor:pointer; background:#f4f4f4; }
+  .att-thumb .rm { position:absolute; top:-6px; right:-6px; background:#d9534f; color:#fff; border:none; border-radius:50%; width:20px; height:20px; cursor:pointer; font-size:12px; line-height:20px; padding:0; }
+  .att-thumb .cap { font-size:11px; color:#888; text-align:center; margin-top:2px; }
+  .att-empty { color:#aaa; font-size:13px; margin-bottom:8px; }
+  .paid-badge { background:#1d9e75; color:#fff; border-radius:6px; padding:2px 8px; font-size:13px; }
+</style>
 </head>
 <body data-page="purchase-request">
 <div class="layout">
@@ -16,49 +33,88 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="shared/supabase-client.js"></script>
 <script src="shared/auth-guard.js"></script>
-<script src="shared/dynamic-rows.js"></script>
 <script>
 const params = new URLSearchParams(window.location.search);
 const requestId = params.get("id");
 const main = document.getElementById("main-content");
 
+// workflow stages shown as filter tabs (each maps to one or more statuses)
+const STAGES = [
+  { key: "all",       label: "ทั้งหมด",         statuses: null },
+  { key: "wait_c",    label: "รอเสมียนกลาง",    statuses: ["รอเสมียนกลาง"] },
+  { key: "wait_o",    label: "รออนุมัติ",       statuses: ["รออนุมัติเจ้าของ"] },
+  { key: "approved",  label: "อนุมัติแล้ว",     statuses: ["อนุมัติแล้ว"] },
+  { key: "ordered",   label: "สั่งซื้อแล้ว",    statuses: ["สั่งซื้อแล้ว"] },
+  { key: "received",  label: "รับของแล้ว",      statuses: ["รับของแล้ว"] },
+  { key: "other",     label: "ปฏิเสธ/สั่งเอง",  statuses: ["ปฏิเสธ", "สั่งเองไม่ผ่านอนุมัติ"] },
+];
+
+// attachment categories
+const ATT_KINDS = [
+  { key: "approval_signed", label: "ใบอนุมัติที่ปริ๊น + เซ็นแล้ว", icon: "🖊️" },
+  { key: "receipt",         label: "ใบเสร็จ / บิลซื้อ",            icon: "🧾" },
+  { key: "payment",         label: "หลักฐานการจ่ายเงิน",           icon: "💰" },
+  { key: "delivery",        label: "หลักฐานส่งของ / รับของ",       icon: "🚚" },
+];
+const KIND_LABEL = Object.fromEntries(ATT_KINDS.map(k => [k.key, k.label]));
+
+let ALL_ROWS = [];
+let ATT_COUNTS = {};
+let activeStage = "all";
+
+async function loadListData() {
+  const { data } = await sb.from("ops_purchase_requests").select("*").order("id", { ascending: false }).limit(300);
+  ALL_ROWS = data || [];
+  ATT_COUNTS = {};
+  const ids = ALL_ROWS.map(r => r.id);
+  if (ids.length) {
+    const { data: atts } = await sb.from("ops_attachments").select("entity_id").eq("entity_type", "purchase_request").in("entity_id", ids);
+    for (const a of (atts || [])) ATT_COUNTS[a.entity_id] = (ATT_COUNTS[a.entity_id] || 0) + 1;
+  }
+}
+
+function stageOf(status) {
+  for (const s of STAGES) { if (s.statuses && s.statuses.includes(status)) return s.key; }
+  return "other";
+}
+function countFor(stage) {
+  if (stage.key === "all") return ALL_ROWS.length;
+  return ALL_ROWS.filter(r => stage.statuses.includes(r.status)).length;
+}
+
 function renderList() {
   main.innerHTML = `
     <div class="page-header">
-      <div><h1>ใบขอซื้อ / จัดซื้อกลาง</h1><p class="subtitle">คำขอซื้อของทุกฟาร์มวิ่งเข้าศูนย์กลางที่นี่</p></div>
+      <div><h1>ใบขอซื้อ / จัดซื้อกลาง</h1><p class="subtitle">คำขอซื้อของทุกฟาร์มวิ่งเข้าศูนย์กลางที่นี่ — แยกตามสถานะการดำเนินการ</p></div>
       <button class="btn" id="new-btn">+ สร้างใบขอซื้อใหม่</button>
     </div>
-    <form id="filter-form" class="card" style="display:flex; gap:14px;">
-      <select id="status-filter">
-        <option value="">ทุกสถานะ</option>
-        <option value="รอเสมียนกลาง">รอเสมียนกลาง</option>
-        <option value="รออนุมัติเจ้าของ">รออนุมัติเจ้าของ</option>
-        <option value="อนุมัติแล้ว">อนุมัติแล้ว</option>
-        <option value="สั่งซื้อแล้ว">สั่งซื้อแล้ว</option>
-        <option value="รับของแล้ว">รับของแล้ว</option>
-        <option value="ปฏิเสธ">ปฏิเสธ</option>
-        <option value="สั่งเองไม่ผ่านอนุมัติ">สั่งเองไม่ผ่านอนุมัติ</option>
-      </select>
-    </form>
+    <div class="stage-tabs" id="stage-tabs"></div>
     <table>
-      <thead><tr><th>เลขที่</th><th>ฟาร์ม</th><th>หมวด</th><th>ผู้ขอ</th><th>วันที่</th><th>สถานะ</th><th></th></tr></thead>
-      <tbody id="pr-rows"><tr><td colspan="7" class="muted">กำลังโหลด...</td></tr></tbody>
+      <thead><tr><th>เลขที่</th><th>ฟาร์ม</th><th>หมวด</th><th>ผู้ขอ</th><th>วันที่</th><th>สถานะ</th><th>จ่ายเงิน</th><th>แนบ</th><th></th></tr></thead>
+      <tbody id="pr-rows"><tr><td colspan="9" class="muted">กำลังโหลด...</td></tr></tbody>
     </table>
   `;
   document.getElementById("new-btn").addEventListener("click", () => window.location.href = "purchase-order-new.html");
-  document.getElementById("status-filter").addEventListener("change", loadList);
-  loadList();
+  renderTabs();
+  renderRows();
 }
 
-async function loadList() {
-  const status = document.getElementById("status-filter").value;
-  let q = sb.from("ops_purchase_requests").select("*").order("id", { ascending: false }).limit(200);
-  if (status) q = q.eq("status", status);
-  const { data, error } = await q;
+function renderTabs() {
+  document.getElementById("stage-tabs").innerHTML = STAGES.map(s => `
+    <div class="stage-tab ${activeStage === s.key ? "active" : ""}" data-key="${s.key}">
+      ${escapeHtml(s.label)} <span class="cnt">${countFor(s)}</span>
+    </div>`).join("");
+  document.querySelectorAll(".stage-tab").forEach(t => t.addEventListener("click", () => {
+    activeStage = t.dataset.key; renderTabs(); renderRows();
+  }));
+}
+
+function renderRows() {
+  const stage = STAGES.find(s => s.key === activeStage);
+  const rows = (stage.key === "all") ? ALL_ROWS : ALL_ROWS.filter(r => stage.statuses.includes(r.status));
   const tbody = document.getElementById("pr-rows");
-  if (error) { tbody.innerHTML = `<tr><td colspan="7" class="muted">โหลดไม่สำเร็จ</td></tr>`; return; }
-  if (!data.length) { tbody.innerHTML = `<tr><td colspan="7" class="muted">ยังไม่มีใบขอซื้อ</td></tr>`; return; }
-  tbody.innerHTML = data.map(r => `
+  if (!rows.length) { tbody.innerHTML = `<tr><td colspan="9" class="muted">ไม่มีรายการในสถานะนี้</td></tr>`; return; }
+  tbody.innerHTML = rows.map(r => `
     <tr>
       <td>${escapeHtml(r.doc_no || "#" + r.id)}</td>
       <td>${escapeHtml(r.farm)}</td>
@@ -66,6 +122,8 @@ async function loadList() {
       <td>${escapeHtml(r.requested_by || "")}</td>
       <td>${new Date(r.created_at).toLocaleDateString("th-TH")}</td>
       <td><span class="badge ${STATUS_BADGE_CLASS[r.status] || ""}">${escapeHtml(r.status)}</span></td>
+      <td>${r.paid_at ? '<span class="paid-badge">จ่ายแล้ว</span>' : '<span class="muted">—</span>'}</td>
+      <td>${ATT_COUNTS[r.id] ? "📎 " + ATT_COUNTS[r.id] : '<span class="muted">—</span>'}</td>
       <td><a class="link" href="purchase-request.html?id=${r.id}">ดูรายละเอียด</a></td>
     </tr>
   `).join("");
@@ -76,6 +134,7 @@ async function renderDetail() {
   if (error || !req) { main.innerHTML = `<div class="card"><h1>ไม่พบใบขอซื้อ</h1></div>`; return; }
   const { data: items } = await sb.from("ops_purchase_request_items").select("*").eq("request_id", requestId);
   const { data: suppliers } = await sb.from("ops_suppliers").select("*").order("name");
+  const userId = (await sb.auth.getUser()).data.user.id;
 
   const canPrice = isOwner() || isCentral();
   const canApprove = isOwner() && req.status === "รออนุมัติเจ้าของ";
@@ -83,12 +142,16 @@ async function renderDetail() {
   const canMarkOrdered = (isOwner() || isCentral()) && req.status === "อนุมัติแล้ว";
   const canMarkReceived = (isOwner() || isCentral()) && req.status === "สั่งซื้อแล้ว";
   const canSelfOrder = myFarms().includes(req.farm) && ["รอเสมียนกลาง"].includes(req.status);
+  const canManage = isOwner() || isCentral();
 
   main.innerHTML = `
     <div class="page-header">
-      <div><h1>${escapeHtml(req.doc_no || "#" + req.id)} <span class="badge ${STATUS_BADGE_CLASS[req.status] || ""}">${escapeHtml(req.status)}</span></h1>
+      <div><h1>${escapeHtml(req.doc_no || "#" + req.id)} <span class="badge ${STATUS_BADGE_CLASS[req.status] || ""}">${escapeHtml(req.status)}</span> ${req.paid_at ? '<span class="paid-badge">จ่ายแล้ว</span>' : ""}</h1>
       <p class="subtitle">ฟาร์ม ${escapeHtml(req.farm)} · ${escapeHtml(DOMAIN_LABELS[req.domain] || req.domain)} · ผู้ขอ ${escapeHtml(req.requested_by || "")}</p></div>
-      <a class="btn secondary" href="purchase-request-print.html?id=${req.id}" target="_blank">🖨️ พิมพ์</a>
+      <div style="display:flex; gap:8px;">
+        <a class="btn secondary" href="purchase-request.html">← กลับรายการ</a>
+        <a class="btn secondary" href="purchase-request-print.html?id=${req.id}" target="_blank">🖨️ พิมพ์</a>
+      </div>
     </div>
 
     <div class="card">
@@ -122,24 +185,23 @@ async function renderDetail() {
 
     <div class="card">
       <h2>ดำเนินการ</h2>
-      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+      <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
         ${canSubmitForApproval ? '<button class="btn" id="submit-approval-btn">ส่งให้เจ้าของอนุมัติ</button>' : ""}
         ${canApprove ? '<button class="btn" id="approve-btn">✅ อนุมัติ</button><button class="btn danger" id="reject-btn">❌ ปฏิเสธ</button>' : ""}
         ${canMarkOrdered ? '<button class="btn" id="ordered-btn">บันทึกว่าสั่งซื้อแล้ว</button>' : ""}
-        ${canMarkReceived ? '<button class="btn" id="received-btn">บันทึกว่ารับของแล้ว (แนบรูป)</button>' : ""}
-        ${canSelfOrder ? '<button class="btn secondary" id="self-order-btn">สั่งเอง ไม่ผ่านอนุมัติ (แนบเอกสาร)</button>' : ""}
-      </div>
-      <div id="photo-upload-area" style="display:none; margin-top:14px;">
-        <label>แนบรูป/เอกสาร</label>
-        <input type="file" id="doc-photo" accept="image/*">
-        <button class="btn small" id="confirm-with-photo-btn" style="margin-top:8px;">ยืนยัน</button>
+        ${canMarkReceived ? '<button class="btn" id="received-btn">บันทึกว่ารับของแล้ว</button>' : ""}
+        ${canSelfOrder ? '<button class="btn secondary" id="self-order-btn">สั่งเอง ไม่ผ่านอนุมัติ</button>' : ""}
+        ${canManage ? (req.paid_at
+          ? '<button class="btn secondary small" id="unpaid-btn">ยกเลิกสถานะจ่ายแล้ว</button>'
+          : '<button class="btn small" id="paid-btn">💰 ทำเครื่องหมายว่าจ่ายแล้ว</button>') : ""}
       </div>
       <div id="action-status" class="muted" style="margin-top:10px;"></div>
     </div>
 
     <div class="card">
-      <h2>เอกสารแนบ</h2>
-      <div id="attachments-list" class="muted">กำลังโหลด...</div>
+      <h2>เอกสาร / รูปภาพแนบ</h2>
+      <p class="subtitle" style="margin-top:-6px;">แนบรูปใบอนุมัติที่ปริ๊นเซ็นแล้ว, บิล/ใบเสร็จ, หลักฐานจ่ายเงิน และหลักฐานส่งของ</p>
+      <div id="att-cats">กำลังโหลด...</div>
     </div>
   `;
 
@@ -152,91 +214,118 @@ async function renderDetail() {
   document.querySelectorAll(".save-price-btn").forEach(btn => {
     btn.addEventListener("click", async () => {
       const row = btn.closest("tr");
-      const itemRowId = row.dataset.id;
       const price = parseFloat(row.querySelector(".pr-price").value) || 0;
-      const { error } = await sb.from("ops_purchase_request_items").update({ unit_price: price }).eq("id", itemRowId);
+      const { error } = await sb.from("ops_purchase_request_items").update({ unit_price: price }).eq("id", row.dataset.id);
       if (!error) renderDetail();
     });
   });
 
-  let pendingAction = null;
-  function showPhotoArea(action) {
-    pendingAction = action;
-    document.getElementById("photo-upload-area").style.display = "block";
+  const statusEl = document.getElementById("action-status");
+  async function setStatus(newStatus, okMsg) {
+    const { error } = await sb.from("ops_purchase_requests").update({ status: newStatus }).eq("id", requestId);
+    statusEl.textContent = error ? ("เกิดข้อผิดพลาด: " + error.message) : okMsg;
+    if (!error) renderDetail();
   }
 
-  document.getElementById("submit-approval-btn")?.addEventListener("click", async () => {
-    const { error } = await sb.from("ops_purchase_requests").update({ status: "รออนุมัติเจ้าของ" }).eq("id", requestId);
-    document.getElementById("action-status").textContent = error ? error.message : "ส่งให้เจ้าของอนุมัติแล้ว";
-    if (!error) renderDetail();
-  });
+  document.getElementById("submit-approval-btn")?.addEventListener("click", () => setStatus("รออนุมัติเจ้าของ", "ส่งให้เจ้าของอนุมัติแล้ว"));
+  document.getElementById("ordered-btn")?.addEventListener("click", () => setStatus("สั่งซื้อแล้ว", "บันทึกว่าสั่งซื้อแล้ว"));
+  document.getElementById("received-btn")?.addEventListener("click", () => setStatus("รับของแล้ว", "บันทึกว่ารับของแล้ว — อย่าลืมแนบหลักฐานส่งของด้านล่าง"));
+  document.getElementById("self-order-btn")?.addEventListener("click", () => setStatus("สั่งเองไม่ผ่านอนุมัติ", "บันทึกว่าสั่งเอง — อย่าลืมแนบเอกสารด้านล่าง"));
 
   document.getElementById("approve-btn")?.addEventListener("click", async () => {
-    const { error: e1 } = await sb.from("ops_approvals").insert({ request_id: requestId, decided_by: (await sb.auth.getUser()).data.user.id, decision: "อนุมัติ" });
-    const { error: e2 } = await sb.from("ops_purchase_requests").update({ status: "อนุมัติแล้ว" }).eq("id", requestId);
-    document.getElementById("action-status").textContent = (e1 || e2) ? "เกิดข้อผิดพลาด" : "อนุมัติเรียบร้อยแล้ว";
-    if (!e1 && !e2) renderDetail();
+    await sb.from("ops_approvals").insert({ request_id: requestId, decided_by: userId, decision: "อนุมัติ" });
+    setStatus("อนุมัติแล้ว", "อนุมัติเรียบร้อยแล้ว — ปริ๊นใบอนุมัติให้เซ็น แล้วแนบรูปด้านล่าง");
   });
-
   document.getElementById("reject-btn")?.addEventListener("click", async () => {
     const note = prompt("เหตุผลที่ปฏิเสธ (ถ้ามี)") || "";
-    const { error: e1 } = await sb.from("ops_approvals").insert({ request_id: requestId, decided_by: (await sb.auth.getUser()).data.user.id, decision: "ปฏิเสธ", note });
-    const { error: e2 } = await sb.from("ops_purchase_requests").update({ status: "ปฏิเสธ" }).eq("id", requestId);
-    document.getElementById("action-status").textContent = (e1 || e2) ? "เกิดข้อผิดพลาด" : "ปฏิเสธคำขอแล้ว";
-    if (!e1 && !e2) renderDetail();
+    await sb.from("ops_approvals").insert({ request_id: requestId, decided_by: userId, decision: "ปฏิเสธ", note });
+    setStatus("ปฏิเสธ", "ปฏิเสธคำขอแล้ว");
   });
 
-  document.getElementById("ordered-btn")?.addEventListener("click", async () => {
-    const { error } = await sb.from("ops_purchase_requests").update({ status: "สั่งซื้อแล้ว" }).eq("id", requestId);
-    document.getElementById("action-status").textContent = error ? "เกิดข้อผิดพลาด" : "บันทึกแล้ว";
+  document.getElementById("paid-btn")?.addEventListener("click", async () => {
+    const { error } = await sb.from("ops_purchase_requests").update({ paid_at: new Date().toISOString() }).eq("id", requestId);
+    statusEl.textContent = error ? "บันทึกไม่สำเร็จ" : "ทำเครื่องหมายว่าจ่ายแล้ว";
+    if (!error) renderDetail();
+  });
+  document.getElementById("unpaid-btn")?.addEventListener("click", async () => {
+    const { error } = await sb.from("ops_purchase_requests").update({ paid_at: null }).eq("id", requestId);
     if (!error) renderDetail();
   });
 
-  document.getElementById("received-btn")?.addEventListener("click", () => showPhotoArea("received"));
-  document.getElementById("self-order-btn")?.addEventListener("click", () => showPhotoArea("self-order"));
-
-  document.getElementById("confirm-with-photo-btn")?.addEventListener("click", async () => {
-    const file = document.getElementById("doc-photo").files[0];
-    const statusEl = document.getElementById("action-status");
-    if (pendingAction === "received" && !file) { statusEl.textContent = "กรุณาแนบรูปยืนยันการรับของ"; return; }
-    if (file) {
-      const path = `purchase/${requestId}/${Date.now()}-${file.name}`;
-      const { error: upErr } = await sb.storage.from("ops-attachments").upload(path, file);
-      if (!upErr) {
-        await sb.from("ops_attachments").insert({
-          entity_type: "purchase_request", entity_id: requestId, storage_path: path,
-          uploaded_by: (await sb.auth.getUser()).data.user.id,
-          note: pendingAction === "self-order" ? "เอกสารประกอบการสั่งเอง" : "รูปยืนยันรับของ",
-        });
-      }
-    }
-    if (pendingAction === "received") {
-      await sb.from("ops_purchase_requests").update({ status: "รับของแล้ว" }).eq("id", requestId);
-    } else if (pendingAction === "self-order") {
-      await sb.from("ops_purchase_requests").update({ status: "สั่งเองไม่ผ่านอนุมัติ" }).eq("id", requestId);
-    }
-    statusEl.textContent = "บันทึกเรียบร้อยแล้ว";
-    renderDetail();
-  });
-
-  const { data: attachments } = await sb.from("ops_attachments").select("*").eq("entity_type", "purchase_request").eq("entity_id", requestId);
-  const attEl = document.getElementById("attachments-list");
-  if (attachments && attachments.length) {
-    attEl.innerHTML = attachments.map(a => `<div style="margin-bottom:6px;"><a href="#" onclick="viewAttachment('${a.storage_path}');return false;">${escapeHtml(a.note || "ไฟล์แนบ")}</a> <span class="muted">(${new Date(a.created_at).toLocaleString("th-TH")})</span></div>`).join("");
-  } else {
-    attEl.textContent = "ยังไม่มีเอกสารแนบ";
-  }
+  await renderAttachments(userId);
 }
 
-async function viewAttachment(path) {
-  const { data } = await sb.storage.from("ops-attachments").createSignedUrl(path, 300);
-  if (data && data.signedUrl) window.open(data.signedUrl, "_blank");
+async function renderAttachments(userId) {
+  const { data: atts } = await sb.from("ops_attachments").select("*")
+    .eq("entity_type", "purchase_request").eq("entity_id", requestId).order("created_at", { ascending: false });
+  const byKind = {};
+  for (const a of (atts || [])) { const k = a.kind || "other"; (byKind[k] = byKind[k] || []).push(a); }
+
+  const cats = ATT_KINDS.slice();
+  if (byKind.other && byKind.other.length) cats.push({ key: "other", label: "อื่นๆ", icon: "📎" });
+
+  const container = document.getElementById("att-cats");
+  container.innerHTML = cats.map(cat => {
+    const list = byKind[cat.key] || [];
+    const thumbs = list.map(a => `
+      <div class="att-thumb">
+        <img data-path="${escapeHtml(a.storage_path)}" alt="loading" title="กดเพื่อดูเต็ม">
+        ${(isOwner() || isCentral()) ? `<button class="rm" data-id="${a.id}" data-path="${escapeHtml(a.storage_path)}" title="ลบ">✕</button>` : ""}
+        <div class="cap">${new Date(a.created_at).toLocaleDateString("th-TH")}</div>
+      </div>`).join("");
+    return `
+      <div class="att-cat">
+        <h3>${cat.icon} ${escapeHtml(cat.label)} <span class="muted" style="font-weight:normal;">(${list.length})</span></h3>
+        <div class="att-thumbs">${thumbs || '<span class="att-empty">ยังไม่มีรูป</span>'}</div>
+        ${cat.key !== "other" ? `
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <input type="file" accept="image/*" class="att-file" data-kind="${cat.key}">
+            <button class="btn small att-upload" data-kind="${cat.key}">อัปโหลด</button>
+            <span class="att-msg muted" data-kind="${cat.key}" style="font-size:13px;"></span>
+          </div>` : ""}
+      </div>`;
+  }).join("");
+
+  // load thumbnail signed URLs
+  for (const img of container.querySelectorAll("img[data-path]")) {
+    const { data } = await sb.storage.from("ops-attachments").createSignedUrl(img.dataset.path, 600);
+    if (data?.signedUrl) { img.src = data.signedUrl; img.onclick = () => window.open(data.signedUrl, "_blank"); }
+  }
+
+  container.querySelectorAll(".att-upload").forEach(btn => btn.addEventListener("click", async () => {
+    const kind = btn.dataset.kind;
+    const fileInput = container.querySelector(`.att-file[data-kind="${kind}"]`);
+    const msg = container.querySelector(`.att-msg[data-kind="${kind}"]`);
+    const file = fileInput.files[0];
+    if (!file) { msg.textContent = "เลือกรูปก่อน"; return; }
+    msg.textContent = "กำลังอัปโหลด...";
+    const safeName = file.name.replace(/[^\w.\-]/g, "_");
+    const path = `purchase/${requestId}/${kind}-${Date.now()}-${safeName}`;
+    const { error: upErr } = await sb.storage.from("ops-attachments").upload(path, file);
+    if (upErr) { msg.textContent = "อัปโหลดไม่สำเร็จ: " + upErr.message; return; }
+    const { error: insErr } = await sb.from("ops_attachments").insert({
+      entity_type: "purchase_request", entity_id: requestId, storage_path: path,
+      kind, note: KIND_LABEL[kind], uploaded_by: userId,
+    });
+    if (insErr) { msg.textContent = "บันทึกไม่สำเร็จ: " + insErr.message; return; }
+    // uploading a payment proof marks the request as paid
+    if (kind === "payment") await sb.from("ops_purchase_requests").update({ paid_at: new Date().toISOString() }).eq("id", requestId);
+    renderDetail();
+  }));
+
+  container.querySelectorAll(".att-thumb .rm").forEach(btn => btn.addEventListener("click", async () => {
+    if (!confirm("ลบรูปนี้?")) return;
+    await sb.storage.from("ops-attachments").remove([btn.dataset.path]);
+    await sb.from("ops_attachments").delete().eq("id", btn.dataset.id);
+    renderAttachments(userId);
+  }));
 }
 
 (async () => {
   const user = await requireAuth();
   if (!user) return;
-  if (requestId) renderDetail(); else renderList();
+  if (requestId) { renderDetail(); }
+  else { renderList(); await loadListData(); renderTabs(); renderRows(); }
 })();
 </script>
 </body>
