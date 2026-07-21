@@ -47,10 +47,19 @@
             <h2 id="detail-name" style="margin:0;"></h2>
             <button class="btn danger small" id="delete-sup-btn">ลบผู้ขายรายนี้</button>
           </div>
+          <div class="row" style="gap:10px; flex-wrap:wrap;">
+            <div class="field" style="flex:1; min-width:120px;"><label>ชื่อย่อ/รหัส</label><input type="text" id="detail-code"></div>
+            <div class="field" style="flex:1; min-width:120px;"><label>เบอร์โทร</label><input type="text" id="detail-phone"></div>
+            <div class="field" style="flex:1; min-width:140px;"><label>ผู้ติดต่อ</label><input type="text" id="detail-contact"></div>
+          </div>
+          <div class="row" style="gap:10px; flex-wrap:wrap;">
+            <div class="field" style="flex:1; min-width:120px;"><label>ธนาคาร</label><input type="text" id="detail-bank"></div>
+            <div class="field" style="flex:1; min-width:120px;"><label>สาขา</label><input type="text" id="detail-branch"></div>
+            <div class="field" style="flex:1; min-width:140px;"><label>เลขบัญชี</label><input type="text" id="detail-account"></div>
+          </div>
           <div class="row" style="gap:10px;">
-            <div class="field" style="flex:1;"><label>เบอร์โทร</label><input type="text" id="detail-phone"></div>
-            <div class="field" style="flex:2;"><label>ที่อยู่</label><input type="text" id="detail-address"></div>
-            <div class="field" style="flex:0; align-self:end;"><button class="btn small secondary" id="save-contact-btn">บันทึกข้อมูลติดต่อ</button></div>
+            <div class="field" style="flex:1;"><label>ที่อยู่</label><input type="text" id="detail-address"></div>
+            <div class="field" style="flex:0; align-self:end;"><button class="btn small secondary" id="save-contact-btn">บันทึกข้อมูล</button></div>
           </div>
 
           <h3>สินค้าที่ผู้ขายมี / ราคาที่เคยซื้อ</h3>
@@ -101,13 +110,17 @@ function fmtDate(d) { return d ? new Date(d + "T00:00:00").toLocaleDateString("t
 
 function renderSupList() {
   const q = document.getElementById("sup-search").value.trim();
-  const list = SUPPLIERS.filter(s => !q || (s.name && s.name.includes(q)) || (s.phone && s.phone.includes(q)));
+  const list = SUPPLIERS.filter(s => !q ||
+    (s.name && s.name.includes(q)) || (s.code && s.code.includes(q)) ||
+    (s.phone && s.phone.includes(q)) || (s.account_no && s.account_no.includes(q)));
   const el = document.getElementById("sup-list");
-  el.innerHTML = list.length ? list.map(s => `
+  const shown = list.slice(0, 200);
+  const cap = list.length > shown.length ? `<p class="muted" style="font-size:12px;">แสดง ${shown.length} จาก ${list.length} — พิมพ์ค้นหาเพื่อกรอง</p>` : "";
+  el.innerHTML = list.length ? (shown.map(s => `
     <div class="sup-item ${SELECTED && SELECTED.id === s.id ? 'selected' : ''}" onclick="selectSup(${s.id})">
-      <div class="nm">${escapeHtml(s.name)}</div>
-      <div class="sub">${escapeHtml(s.phone || "")}${s.address ? " · " + escapeHtml(s.address) : ""}</div>
-    </div>`).join("") : `<p class="muted">ไม่พบผู้ขาย</p>`;
+      <div class="nm">${escapeHtml(s.code ? s.code + " · " : "")}${escapeHtml(s.name)}</div>
+      <div class="sub">${escapeHtml([s.phone, s.bank && (s.bank + (s.account_no ? " " + s.account_no : ""))].filter(Boolean).join(" · ")) || "&nbsp;"}</div>
+    </div>`).join("") + cap) : `<p class="muted">ไม่พบผู้ขาย</p>`;
 }
 
 async function selectSup(id) {
@@ -116,7 +129,12 @@ async function selectSup(id) {
   document.getElementById("no-sup").style.display = "none";
   document.getElementById("detail-body").style.display = "block";
   document.getElementById("detail-name").textContent = SELECTED.name;
+  document.getElementById("detail-code").value = SELECTED.code || "";
   document.getElementById("detail-phone").value = SELECTED.phone || "";
+  document.getElementById("detail-contact").value = SELECTED.contact || "";
+  document.getElementById("detail-bank").value = SELECTED.bank || "";
+  document.getElementById("detail-branch").value = SELECTED.bank_branch || "";
+  document.getElementById("detail-account").value = SELECTED.account_no || "";
   document.getElementById("detail-address").value = SELECTED.address || "";
   await loadCatalog();
 }
@@ -183,11 +201,18 @@ async function loadDatalistForDomain(domain) {
   });
 
   document.getElementById("save-contact-btn").addEventListener("click", async () => {
-    const phone = document.getElementById("detail-phone").value.trim();
-    const address = document.getElementById("detail-address").value.trim();
-    await sb.from("ops_suppliers").update({ phone, address }).eq("id", SELECTED.id);
-    SELECTED.phone = phone; SELECTED.address = address;
-    const idx = SUPPLIERS.findIndex(s => s.id === SELECTED.id); if (idx >= 0) { SUPPLIERS[idx].phone = phone; SUPPLIERS[idx].address = address; }
+    const patch = {
+      code: document.getElementById("detail-code").value.trim(),
+      phone: document.getElementById("detail-phone").value.trim(),
+      contact: document.getElementById("detail-contact").value.trim(),
+      bank: document.getElementById("detail-bank").value.trim(),
+      bank_branch: document.getElementById("detail-branch").value.trim(),
+      account_no: document.getElementById("detail-account").value.trim(),
+      address: document.getElementById("detail-address").value.trim(),
+    };
+    await sb.from("ops_suppliers").update(patch).eq("id", SELECTED.id);
+    Object.assign(SELECTED, patch);
+    const idx = SUPPLIERS.findIndex(s => s.id === SELECTED.id); if (idx >= 0) Object.assign(SUPPLIERS[idx], patch);
     renderSupList();
     alert("บันทึกข้อมูลติดต่อแล้ว");
   });
