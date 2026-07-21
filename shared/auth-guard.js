@@ -62,6 +62,7 @@ function renderNav() {
     <a href="dashboard.html">หน้าแรก</a>
     <a href="stock.html">คลังสินค้า / Stock</a>
     <a href="purchase-request.html">ใบขอซื้อ / อนุมัติ</a>
+    <a href="bill-archive.html">คลังบิลและประวัติ</a>
     <a href="jobs.html">ใบส่งงานช่าง</a>
     <a href="vouchers.html">ใบสำคัญรับ/จ่ายเงิน</a>
   `;

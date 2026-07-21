@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>คลังบิลและประวัติ - THE CORE</title>
+<link rel="stylesheet" href="shared/style.css">
+<style>
+  body[data-page] .content { max-width: none; }
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 16px; }
+  .stat { background: #fff; border-radius: 12px; padding: 16px 18px; box-shadow: 0 1px 3px rgba(0,0,0,.08); border: 1px solid #e3e7e4; }
+  .stat .lbl { color: #777; font-size: 13px; }
+  .stat .val { font-size: 24px; font-weight: bold; margin-top: 4px; }
+  .stat.green .val { color: #1d9e75; }
+  .stat.amber .val { color: #c9973a; }
+  .filters { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; }
+  .filters .field { margin: 0; }
+  .bill-thumbs { display: flex; gap: 3px; }
+  .bill-thumbs img { width: 30px; height: 30px; object-fit: cover; border-radius: 4px; border: 1px solid #ddd; }
+</style>
+</head>
+<body data-page="bill-archive">
+<div class="layout">
+  <nav id="nav-root" class="sidebar no-print"></nav>
+  <main class="content">
+    <div class="page-header">
+      <div><h1>คลังบิลและประวัติ</h1><p class="subtitle">คลังเก็บบิลที่ปิดแล้ว พร้อมรูปบิลและรายละเอียด — ค้นหา/กรอง/ดูย้อนหลังได้</p></div>
+    </div>
+
+    <div class="stat-grid" id="stats"></div>
+
+    <div class="card">
+      <div class="filters">
+        <div class="field"><label>สถานะ</label>
+          <select id="f-status">
+            <option value="รับของแล้ว">ปิดบิลแล้ว (รับของแล้ว)</option>
+            <option value="สั่งซื้อแล้ว">สั่งซื้อแล้ว</option>
+            <option value="อนุมัติแล้ว">อนุมัติแล้ว</option>
+            <option value="__all">ทุกสถานะ (ไม่รวมที่ทิ้ง)</option>
+          </select>
+        </div>
+        <div class="field"><label>จ่ายเงิน</label>
+          <select id="f-paid"><option value="">ทั้งหมด</option><option value="paid">จ่ายแล้ว</option><option value="unpaid">ยังไม่จ่าย</option></select>
+        </div>
+        <div class="field"><label>ตั้งแต่วันที่</label><input type="date" id="f-from"></div>
+        <div class="field"><label>ถึงวันที่</label><input type="date" id="f-to"></div>
+        <div class="field" style="flex:1; min-width:180px;"><label>ค้นหา (เลขที่/ฟาร์ม/ผู้ขาย)</label><input type="text" id="f-search" placeholder="พิมพ์เพื่อค้นหา"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <table>
+        <thead><tr><th>เลขที่</th><th>วันที่</th><th>ฟาร์ม</th><th>บริษัท</th><th>ผู้ขาย</th><th class="text-right">มูลค่ารวม</th><th>จ่าย</th><th>รูปบิล</th><th></th></tr></thead>
+        <tbody id="rows"><tr><td colspan="9" class="muted">กำลังโหลด...</td></tr></tbody>
+      </table>
+    </div>
+  </main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="shared/supabase-client.js"></script>
+<script src="shared/auth-guard.js"></script>
+<script src="shared/lightbox.js"></script>
+<script>
+let PRS = [];          // raw purchase requests (status-filtered)
+let TOTALS = {};       // request_id -> sum
+let ATT = {};          // request_id -> [storage_path,...]
+let COMPANIES = {};    // id -> name
+let SUPPLIERS = {};    // id -> name
+
+function fmtDate(d) { return d ? new Date(d).toLocaleDateString("th-TH") : "-"; }
+
+async function loadData() {
+  const status = document.getElementById("f-status").value;
+  let q = sb.from("ops_purchase_requests").select("*").order("id", { ascending: false }).limit(500);
+  if (status === "__all") q = q.neq("status", "ยกเลิก");
+  else q = q.eq("status", status);
+  const { data } = await q;
+  PRS = data || [];
+  const ids = PRS.map(p => p.id);
+
+  TOTALS = {}; ATT = {};
+  if (ids.length) {
+    const { data: items } = await sb.from("ops_purchase_request_items").select("request_id, qty, unit_price").in("request_id", ids);
+    for (const it of (items || [])) TOTALS[it.request_id] = (TOTALS[it.request_id] || 0) + (it.qty * it.unit_price);
+    const { data: atts } = await sb.from("ops_attachments").select("entity_id, storage_path").eq("entity_type", "purchase_request").in("entity_id", ids).order("created_at");
+    for (const a of (atts || [])) (ATT[a.entity_id] = ATT[a.entity_id] || []).push(a.storage_path);
+  }
+  render();
+}
+
+function applyFilters() {
+  const paid = document.getElementById("f-paid").value;
+  const from = document.getElementById("f-from").value;
+  const to = document.getElementById("f-to").value;
+  const search = document.getElementById("f-search").value.trim();
+  return PRS.filter(p => {
+    if (paid === "paid" && !p.paid_at) return false;
+    if (paid === "unpaid" && p.paid_at) return false;
+    const d = (p.created_at || "").slice(0, 10);
+    if (from && d < from) return false;
+    if (to && d > to) return false;
+    if (search) {
+      const hay = `${p.doc_no || ""} ${p.farm || ""} ${SUPPLIERS[p.supplier_id] || ""} ${COMPANIES[p.company_id] || ""}`;
+      if (!hay.includes(search)) return false;
+    }
+    return true;
+  });
+}
+
+function render() {
+  const list = applyFilters();
+  // summary
+  const totalValue = list.reduce((s, p) => s + (TOTALS[p.id] || 0), 0);
+  const paidCount = list.filter(p => p.paid_at).length;
+  const thisMonth = list.filter(p => (p.created_at || "").slice(0, 7) === new Date().toISOString().slice(0, 7)).length;
+  document.getElementById("stats").innerHTML = `
+    <div class="stat"><div class="lbl">จำนวนบิล</div><div class="val">${list.length}</div></div>
+    <div class="stat green"><div class="lbl">มูลค่ารวม</div><div class="val">${formatNumber(totalValue)} ฿</div></div>
+    <div class="stat"><div class="lbl">จ่ายแล้ว / ยังไม่จ่าย</div><div class="val">${paidCount} / ${list.length - paidCount}</div></div>
+    <div class="stat amber"><div class="lbl">บิลเดือนนี้</div><div class="val">${thisMonth}</div></div>`;
+
+  const tbody = document.getElementById("rows");
+  if (!list.length) { tbody.innerHTML = `<tr><td colspan="9" class="muted">ไม่พบบิลตามเงื่อนไข</td></tr>`; return; }
+  tbody.innerHTML = list.map(p => {
+    const imgs = ATT[p.id] || [];
+    return `<tr>
+      <td>${escapeHtml(p.doc_no || "#" + p.id)}</td>
+      <td>${fmtDate(p.created_at)}</td>
+      <td>${escapeHtml(p.farm || "")}</td>
+      <td>${escapeHtml(COMPANIES[p.company_id] || "-")}</td>
+      <td>${escapeHtml(SUPPLIERS[p.supplier_id] || "-")}</td>
+      <td class="text-right">${formatNumber(TOTALS[p.id] || 0)}</td>
+      <td>${p.paid_at ? '<span class="badge" style="background:#1d9e75; color:#fff;">จ่ายแล้ว</span>' : '<span class="muted">—</span>'}</td>
+      <td>${imgs.length ? `<button class="btn small secondary" onclick="viewBillImages(${p.id})">🖼️ ${imgs.length}</button>` : '<span class="muted">—</span>'}</td>
+      <td><a class="link" href="purchase-request.html?id=${p.id}">ดูรายละเอียด</a></td>
+    </tr>`;
+  }).join("");
+}
+
+async function viewBillImages(id) {
+  const paths = ATT[id] || [];
+  if (!paths.length) return;
+  const urls = [];
+  for (const path of paths) {
+    const { data } = await sb.storage.from("ops-attachments").createSignedUrl(path, 600);
+    if (data?.signedUrl) urls.push(data.signedUrl);
+  }
+  if (urls.length) openLightbox(urls, 0);
+}
+
+(async () => {
+  const user = await requireAuth();
+  if (!user) return;
+  const [{ data: comps }, { data: sups }] = await Promise.all([
+    sb.from("ops_companies").select("id, name"),
+    sb.from("ops_suppliers").select("id, name"),
+  ]);
+  (comps || []).forEach(c => COMPANIES[c.id] = c.name);
+  (sups || []).forEach(s => SUPPLIERS[s.id] = s.name);
+
+  document.getElementById("f-status").addEventListener("change", loadData);
+  ["f-paid", "f-from", "f-to", "f-search"].forEach(id => document.getElementById(id).addEventListener("input", render));
+  await loadData();
+})();
+</script>
+</body>
+</html>
