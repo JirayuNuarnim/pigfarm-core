@@ -17,6 +17,17 @@
   .filters .field { margin: 0; }
   .bill-thumbs { display: flex; gap: 3px; }
   .bill-thumbs img { width: 30px; height: 30px; object-fit: cover; border-radius: 4px; border: 1px solid #ddd; }
+  .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 900px) { .chart-grid { grid-template-columns: 1fr; } }
+  .bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 7px; }
+  .bar-lbl { width: 92px; font-size: 13px; flex: 0 0 auto; text-align: right; color: #555; }
+  .bar-track { flex: 1; background: #eef1ef; border-radius: 6px; height: 20px; overflow: hidden; }
+  .bar-fill { background: #1d9e75; height: 100%; border-radius: 6px; min-width: 2px; }
+  .bar-val { width: 104px; text-align: right; font-size: 13px; flex: 0 0 auto; }
+  @media print {
+    .stat { break-inside: avoid; }
+    table { font-size: 12px; }
+  }
 </style>
 </head>
 <body data-page="bill-archive">
@@ -25,6 +36,10 @@
   <main class="content">
     <div class="page-header">
       <div><h1>คลังบิลและประวัติ</h1><p class="subtitle">คลังเก็บบิลที่ปิดแล้ว พร้อมรูปบิลและรายละเอียด — ค้นหา/กรอง/ดูย้อนหลังได้</p></div>
+      <div class="no-print" style="display:flex; gap:8px;">
+        <button class="btn secondary" id="export-btn">📥 ส่งออก Excel (.csv)</button>
+        <button class="btn secondary" id="print-btn">🖨️ พิมพ์ / บันทึก PDF</button>
+      </div>
     </div>
 
     <div class="stat-grid" id="stats"></div>
@@ -45,6 +60,14 @@
         <div class="field"><label>ตั้งแต่วันที่</label><input type="date" id="f-from"></div>
         <div class="field"><label>ถึงวันที่</label><input type="date" id="f-to"></div>
         <div class="field" style="flex:1; min-width:180px;"><label>ค้นหา (เลขที่/ฟาร์ม/ผู้ขาย)</label><input type="text" id="f-search" placeholder="พิมพ์เพื่อค้นหา"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0;">สรุปยอดซื้อ</h2>
+      <div class="chart-grid">
+        <div><div class="muted" style="margin-bottom:8px;">รายเดือน (มูลค่ารวม)</div><div id="chart-month"></div></div>
+        <div><div class="muted" style="margin-bottom:8px;">รายฟาร์ม (มูลค่ารวม)</div><div id="chart-farm"></div></div>
       </div>
     </div>
 
@@ -119,6 +142,8 @@ function render() {
     <div class="stat"><div class="lbl">จ่ายแล้ว / ยังไม่จ่าย</div><div class="val">${paidCount} / ${list.length - paidCount}</div></div>
     <div class="stat amber"><div class="lbl">บิลเดือนนี้</div><div class="val">${thisMonth}</div></div>`;
 
+  renderCharts(list);
+
   const tbody = document.getElementById("rows");
   if (!list.length) { tbody.innerHTML = `<tr><td colspan="9" class="muted">ไม่พบบิลตามเงื่อนไข</td></tr>`; return; }
   tbody.innerHTML = list.map(p => {
@@ -135,6 +160,51 @@ function render() {
       <td><a class="link" href="purchase-request.html?id=${p.id}">ดูรายละเอียด</a></td>
     </tr>`;
   }).join("");
+}
+
+function thaiMonth(m) {
+  if (!m) return "-";
+  const [y, mo] = m.split("-");
+  const names = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+  return names[+mo - 1] + " " + (((+y) + 543) % 100);
+}
+function barChart(entries, labelFn) {
+  if (!entries.length) return `<div class="muted">ไม่มีข้อมูล</div>`;
+  const max = Math.max(1, ...entries.map(e => e[1]));
+  return entries.map(([k, v]) => `
+    <div class="bar-row">
+      <div class="bar-lbl">${escapeHtml(labelFn(k))}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${(v / max * 100).toFixed(1)}%;"></div></div>
+      <div class="bar-val">${formatNumber(v)}</div>
+    </div>`).join("");
+}
+function renderCharts(list) {
+  const byMonth = {}, byFarm = {};
+  list.forEach(p => {
+    const m = (p.created_at || "").slice(0, 7);
+    byMonth[m] = (byMonth[m] || 0) + (TOTALS[p.id] || 0);
+    byFarm[p.farm || "-"] = (byFarm[p.farm || "-"] || 0) + (TOTALS[p.id] || 0);
+  });
+  const months = Object.entries(byMonth).sort((a, b) => a[0].localeCompare(b[0])).slice(-12);
+  const farms = Object.entries(byFarm).sort((a, b) => b[1] - a[1]);
+  document.getElementById("chart-month").innerHTML = barChart(months, thaiMonth);
+  document.getElementById("chart-farm").innerHTML = barChart(farms, f => f);
+}
+
+function exportCSV() {
+  const list = applyFilters();
+  const headers = ["เลขที่", "วันที่", "ฟาร์ม", "บริษัท", "ผู้ขาย", "มูลค่ารวม", "จ่ายเงิน", "จำนวนรูปแนบ", "สถานะ"];
+  const rows = list.map(p => [
+    p.doc_no || ("#" + p.id), fmtDate(p.created_at), p.farm || "", COMPANIES[p.company_id] || "", SUPPLIERS[p.supplier_id] || "",
+    (TOTALS[p.id] || 0).toFixed(2), p.paid_at ? "จ่ายแล้ว" : "ยังไม่จ่าย", (ATT[p.id] || []).length, p.status || "",
+  ]);
+  const esc = v => `"${String(v).replace(/"/g, '""')}"`;
+  const csv = "﻿" + [headers, ...rows].map(r => r.map(esc).join(",")).join("\r\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = `คลังบิล_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click(); URL.revokeObjectURL(url);
 }
 
 async function viewBillImages(id) {
@@ -160,6 +230,8 @@ async function viewBillImages(id) {
 
   document.getElementById("f-status").addEventListener("change", loadData);
   ["f-paid", "f-from", "f-to", "f-search"].forEach(id => document.getElementById(id).addEventListener("input", render));
+  document.getElementById("export-btn").addEventListener("click", exportCSV);
+  document.getElementById("print-btn").addEventListener("click", () => window.print());
   await loadData();
 })();
 </script>
