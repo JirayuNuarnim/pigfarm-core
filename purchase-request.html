@@ -359,6 +359,14 @@ async function renderDetail() {
     </div>
 
     <div class="card">
+      <h2>🔍 เทียบราคาด้วย AI</h2>
+      <p class="subtitle" style="margin-top:-6px;">ให้ AI อ่านราคาจากใบเสนอราคาที่แนบ (หมวด ⚖️ ใบเทียบราคา) แล้วเรียงเทียบให้อัตโนมัติ — <b>ต้องตรวจ/แก้ก่อนใช้เสมอ</b></p>
+      <button class="btn" id="ai-compare-btn">อ่านใบเสนอราคาด้วย AI</button>
+      <div id="ai-compare-status" class="muted" style="margin-top:8px;"></div>
+      <div id="ai-compare-result" style="margin-top:12px;"></div>
+    </div>
+
+    <div class="card">
       <h2>เอกสาร / รูปภาพแนบ</h2>
       <p class="subtitle" style="margin-top:-6px;">แนบรูปใบอนุมัติที่ปริ๊นเซ็นแล้ว, บิล/ใบเสร็จ, หลักฐานจ่ายเงิน และหลักฐานส่งของ</p>
       <div id="att-cats">กำลังโหลด...</div>
@@ -466,6 +474,69 @@ async function renderDetail() {
     const { error } = await sb.from("ops_purchase_requests").update({ status: "รอเสมียนกลาง", voided_at: null, voided_by: null, void_reason: null }).eq("id", requestId);
     statusEl.textContent = error ? ("กู้คืนไม่สำเร็จ: " + error.message) : "กู้คืนเอกสารแล้ว";
     if (!error) renderDetail();
+  });
+
+  function renderCompare(results, el) {
+    const vendors = results.map((r, i) => r.vendor || ("ใบที่ " + (i + 1)));
+    const errs = results.filter(r => r.error);
+    const map = {};
+    results.forEach((r, vi) => {
+      (r.items || []).forEach(it => {
+        const name = (it.name || "").trim(); if (!name) return;
+        const size = (it.size || "").trim();
+        const key = (name + "|" + size).replace(/\s+/g, "").toLowerCase();
+        if (!map[key]) map[key] = { name, size, prices: {} };
+        if (it.unit_price != null && !isNaN(Number(it.unit_price))) map[key].prices[vi] = Number(it.unit_price);
+      });
+    });
+    const rows = Object.values(map);
+    let html = "";
+    if (errs.length) html += `<div style="color:#c0392b; font-size:13px; margin-bottom:8px;">อ่านไม่ได้ ${errs.length} ใบ: ${errs.map(e => escapeHtml(e.error || "")).join("; ")}</div>`;
+    html += `<div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px; margin-bottom:14px;">` +
+      results.map((r, vi) => `<div style="border:1px solid #e3e7e4; border-radius:8px; padding:10px;">
+        <div style="font-weight:bold;">${escapeHtml(vendors[vi])}</div>
+        ${(r.items && r.items.length) ? `<ul style="margin:6px 0 0; padding-left:18px; font-size:13px;">` + r.items.map(it => `<li>${escapeHtml(it.name || "")}${it.size ? ` (${escapeHtml(it.size)})` : ""} — ${it.unit_price != null ? formatNumber(it.unit_price) : "?"}${it.unit ? ("/" + escapeHtml(it.unit)) : ""}</li>`).join("") + `</ul>` : `<div class="muted" style="font-size:13px;">${r.error ? escapeHtml(r.error) : "ไม่พบรายการ"}</div>`}
+      </div>`).join("") + `</div>`;
+    if (rows.length) {
+      html += `<h3 style="margin:6px 0;">ตารางเทียบราคา (ไฮไลต์เขียว = ถูกสุด)</h3><div style="overflow-x:auto;"><table><thead><tr><th>สินค้า</th>${vendors.map(v => `<th class="text-right">${escapeHtml(v)}</th>`).join("")}<th>ถูกสุด</th>${canEdit ? "<th></th>" : ""}</tr></thead><tbody>`;
+      rows.forEach(row => {
+        const entries = Object.entries(row.prices);
+        const min = entries.length ? Math.min(...entries.map(([, p]) => p)) : null;
+        const minVi = entries.find(([, p]) => p === min)?.[0];
+        html += `<tr><td>${escapeHtml(row.name)}${row.size ? ` (${escapeHtml(row.size)})` : ""}</td>` +
+          vendors.map((v, vi) => { const p = row.prices[vi]; const isMin = p != null && p === min; return `<td class="text-right"${isMin ? ' style="background:#e1f5ee; font-weight:bold; color:#1d9e75;"' : ""}>${p != null ? formatNumber(p) : "-"}</td>`; }).join("") +
+          `<td>${min != null ? `${escapeHtml(vendors[minVi])} @ ${formatNumber(min)}` : "-"}</td>` +
+          (canEdit ? `<td><button class="btn small ai-fill-btn" data-name="${escapeHtml(row.name)}" data-size="${escapeHtml(row.size)}" data-price="${min != null ? min : 0}">➕ เติมลงใบ</button></td>` : "") +
+          `</tr>`;
+      });
+      html += `</tbody></table></div>`;
+    }
+    el.innerHTML = html;
+    el.querySelectorAll(".ai-fill-btn").forEach(btn => btn.addEventListener("click", async () => {
+      const description = btn.dataset.size ? `${btn.dataset.name} (${btn.dataset.size})` : btn.dataset.name;
+      const { error } = await sb.from("ops_purchase_request_items").insert({ request_id: requestId, description, qty: 1, unit: "", unit_price: parseFloat(btn.dataset.price) || 0 });
+      if (!error) renderDetail();
+    }));
+  }
+
+  document.getElementById("ai-compare-btn")?.addEventListener("click", async () => {
+    const sEl = document.getElementById("ai-compare-status");
+    const rEl = document.getElementById("ai-compare-result");
+    const { data: atts } = await sb.from("ops_attachments").select("storage_path")
+      .eq("entity_type", "purchase_request").eq("entity_id", requestId).eq("kind", "price_compare");
+    const paths = (atts || []).map(a => a.storage_path);
+    if (!paths.length) { sEl.textContent = "ยังไม่มีใบเสนอราคาแนบ (หมวด ⚖️ ใบเทียบราคา)"; return; }
+    sEl.textContent = `กำลังให้ AI อ่าน ${paths.length} ใบ... (อาจใช้เวลาสักครู่)`;
+    rEl.innerHTML = "";
+    const { data, error } = await sb.functions.invoke("read-quotation", { body: { paths } });
+    if (error) {
+      let msg = error.message;
+      try { const body = await error.context.json(); if (body?.error) msg = body.error; } catch (_) {}
+      sEl.textContent = "ผิดพลาด: " + msg; return;
+    }
+    if (data.error) { sEl.textContent = "ผิดพลาด: " + data.error; return; }
+    sEl.textContent = "อ่านเสร็จแล้ว — โปรดตรวจสอบความถูกต้องก่อนนำไปใช้";
+    renderCompare(data.results || [], rEl);
   });
 
   await renderAttachments(userId);
