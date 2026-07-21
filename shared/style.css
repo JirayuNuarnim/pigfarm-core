@@ -96,6 +96,27 @@ a.link { color: #2a6b45; }
 .login-card { background: #fff; border-radius: 10px; padding: 32px; width: 340px; box-shadow: 0 4px 20px rgba(0,0,0,.2); }
 .login-card h1 { text-align: center; margin-bottom: 24px; }
 
+/* mobile / phone (e.g. scanning a QR): sidebar becomes a compact scrollable top bar, content full width */
+@media (max-width: 768px) {
+  .layout { flex-direction: column; }
+  .sidebar {
+    width: 100%;
+    flex-direction: row;
+    align-items: center;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 0;
+    flex-wrap: nowrap;
+  }
+  .sidebar .brand { padding: 12px 14px; font-size: 16px; white-space: nowrap; }
+  .sidebar .user-chip { display: none; }
+  .sidebar a { padding: 12px 14px; white-space: nowrap; }
+  .content { padding: 16px 14px; max-width: none; }
+  h1 { font-size: 20px; }
+  /* wide tables scroll inside their own box instead of breaking the page */
+  table { display: block; overflow-x: auto; white-space: nowrap; }
+}
+
 @media print {
   .no-print { display: none !important; }
   .content { padding: 0; max-width: none; }
