@@ -57,8 +57,18 @@
           <div class="field"><label>ผู้ขอ</label><input type="text" id="requested-by" class="flat-input"></div>
           <table style="width:100%; border-collapse:collapse;">
             <thead><tr><th style="text-align:left;">รายการ</th><th>จำนวน</th><th>ราคา</th><th>รวม</th><th></th></tr></thead>
-            <tbody id="bill-lines"><tr><td colspan="5" class="muted" style="padding:12px;">ยังไม่มีรายการ — เลือกจากช่อง 3 ด้านขวา</td></tr></tbody>
+            <tbody id="bill-lines"><tr><td colspan="5" class="muted" style="padding:12px;">ยังไม่มีรายการ — เลือกจากช่อง 3 ด้านขวา หรือพิมพ์เองด้านล่าง</td></tr></tbody>
           </table>
+          <div style="border:1px dashed #ccc; border-radius:8px; padding:10px; margin-top:8px; background:#fffdf7;">
+            <div style="font-size:13px; font-weight:bold; margin-bottom:6px;">✏️ พิมพ์รายการเอง (กรณีผู้ขายไม่มีในรายการ)</div>
+            <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+              <input type="text" id="manual-name" placeholder="พิมพ์ชื่อสินค้า" style="flex:2; min-width:110px; padding:7px 9px; border:1px solid #ccd0d5; border-radius:6px; font-size:14px; font-family:inherit;">
+              <select id="manual-domain" style="padding:7px 9px; border:1px solid #ccd0d5; border-radius:6px; font-size:14px; font-family:inherit;"></select>
+              <input type="number" step="0.01" id="manual-qty" placeholder="จำนวน" value="1" style="width:70px; padding:7px 9px; border:1px solid #ccd0d5; border-radius:6px; font-size:14px;">
+              <input type="number" step="0.01" id="manual-price" placeholder="ราคา" value="0" style="width:70px; padding:7px 9px; border:1px solid #ccd0d5; border-radius:6px; font-size:14px;">
+              <button class="btn small" id="manual-add-btn" type="button">+ เพิ่ม</button>
+            </div>
+          </div>
           <div style="text-align:right; font-size:18px; font-weight:bold; margin:12px 0;">รวมทั้งหมด <span id="grand-total">0.00</span> บาท</div>
           <div class="field"><label>หมายเหตุ</label><textarea id="note" class="flat-input" rows="2"></textarea></div>
           <button class="btn" id="save-btn" style="width:100%;">บันทึกใบขอซื้อ (ส่งเข้าศูนย์กลาง)</button>
@@ -187,6 +197,22 @@ function renderBill() {
   if (canSeeAllFarms()) { const { data } = await sb.from("farms").select("name").order("name"); farms = (data || []).map(f => f.name); }
   else farms = myFarms();
   farmSel.innerHTML = farms.map(f => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join("");
+
+  const domainOpts = (canSeeAllFarms() ? Object.keys(DOMAIN_LABELS) : myDomains());
+  document.getElementById("manual-domain").innerHTML = domainOpts.map(d => `<option value="${d}">${DOMAIN_LABELS[d] || d}</option>`).join("");
+  document.getElementById("manual-add-btn").addEventListener("click", () => {
+    const name = document.getElementById("manual-name").value.trim();
+    if (!name) { document.getElementById("manual-name").focus(); return; }
+    const domain = document.getElementById("manual-domain").value;
+    const qty = parseFloat(document.getElementById("manual-qty").value) || 1;
+    const price = parseFloat(document.getElementById("manual-price").value) || 0;
+    BILL.push({ item_id: null, name, unit: "", domain, qty, price });
+    document.getElementById("manual-name").value = "";
+    document.getElementById("manual-qty").value = "1";
+    document.getElementById("manual-price").value = "0";
+    renderBill();
+    document.getElementById("manual-name").focus();
+  });
 
   const { data: sup } = await sb.from("ops_suppliers").select("*").order("name");
   SUPPLIERS = sup || [];
