@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>แผนที่ผู้ขาย - THE CORE</title>
+<link rel="stylesheet" href="shared/style.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  body[data-page] .content { max-width: none; }
+  .map-grid { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 16px; align-items: start; }
+  @media (max-width: 900px) { .map-grid { grid-template-columns: 1fr; } }
+  #map { height: 620px; border-radius: 12px; z-index: 0; }
+  .sup-item { padding: 10px 12px; border:1px solid #e3e7e4; border-radius:8px; margin-bottom:8px; cursor:pointer; }
+  .sup-item:hover { background:#f2f8f5; border-color:#1d9e75; }
+  .sup-item.selected { background:#e1f5ee; border-color:#1d9e75; }
+  .sup-item .nm { font-weight:bold; }
+  .sup-item .sub { font-size:12px; color:#777; }
+  .pin-badge { font-size:12px; color:#1d9e75; font-weight:bold; }
+  .no-pin { font-size:12px; color:#c9973a; }
+  .pin-emoji { font-size:26px; line-height:26px; text-align:center; filter: drop-shadow(0 1px 1px rgba(0,0,0,.4)); }
+  .map-toolbar { background:#fff; border:1px solid #e3e7e4; border-radius:10px; padding:12px; margin-bottom:10px; }
+</style>
+</head>
+<body data-page="supplier-map">
+<div class="layout">
+  <nav id="nav-root" class="sidebar no-print"></nav>
+  <main class="content">
+    <h1>แผนที่ผู้ขาย</h1>
+    <p class="subtitle">เลือกผู้ขาย แล้วคลิกบนแผนที่ (หรือค้นหาสถานที่) เพื่อปักหมุดตำแหน่งร้าน</p>
+
+    <div class="map-grid">
+      <!-- LEFT: supplier list -->
+      <div class="card">
+        <h2 style="margin-top:0;">รายชื่อผู้ขาย</h2>
+        <input type="text" id="sup-search" placeholder="ค้นหาผู้ขาย" style="margin-bottom:10px;">
+        <div id="sup-list" style="max-height:520px; overflow:auto;"><p class="muted">กำลังโหลด...</p></div>
+      </div>
+
+      <!-- RIGHT: map + controls -->
+      <div>
+        <div class="map-toolbar">
+          <div id="selected-name" style="font-weight:bold; margin-bottom:8px;">← เลือกผู้ขายจากรายชื่อด้านซ้ายก่อน</div>
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <input type="text" id="place-search" placeholder="ค้นหาสถานที่ / ที่อยู่ (เช่น ร้านวัสดุ ปากท่อ)" style="flex:2; min-width:180px; margin:0;" disabled>
+            <button class="btn small secondary" id="search-btn" disabled>ค้นหา</button>
+            <span id="coord-label" class="muted" style="font-size:13px;">ยังไม่ปักหมุด</span>
+            <span style="flex:1;"></span>
+            <button class="btn small" id="save-btn" disabled>บันทึกตำแหน่ง</button>
+            <button class="btn small danger" id="clear-btn" disabled>ล้างตำแหน่ง</button>
+          </div>
+          <div id="map-status" class="muted" style="margin-top:6px; font-size:13px;"></div>
+        </div>
+        <div id="map"></div>
+      </div>
+    </div>
+  </main>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="shared/supabase-client.js"></script>
+<script src="shared/auth-guard.js"></script>
+<script>
+let SUPPLIERS = [];
+let SELECTED = null;
+let PENDING = null;        // {lat, lng} not yet saved
+let map, editMarker, othersLayer;
+
+const DEFAULT_CENTER = [13.386, 99.815]; // ปากท่อ ราชบุรี (ใกล้ฟาร์ม)
+const bigPin = L.divIcon({ className: "", html: '<div class="pin-emoji">📍</div>', iconSize: [26, 26], iconAnchor: [13, 24] });
+
+function fmtCoord(lat, lng) { return `${lat.toFixed(5)}, ${lng.toFixed(5)}`; }
+
+function renderSupList() {
+  const q = document.getElementById("sup-search").value.trim();
+  const list = SUPPLIERS.filter(s => !q || (s.name && s.name.includes(q)) || (s.phone && s.phone.includes(q)));
+  const el = document.getElementById("sup-list");
+  el.innerHTML = list.length ? list.map(s => `
+    <div class="sup-item ${SELECTED && SELECTED.id === s.id ? 'selected' : ''}" onclick="selectSup(${s.id})">
+      <div class="nm">${escapeHtml(s.name)}</div>
+      <div class="sub">${escapeHtml(s.phone || "")}${s.address ? " · " + escapeHtml(s.address) : ""}</div>
+      <div>${(s.lat != null && s.lng != null) ? '<span class="pin-badge">📍 มีตำแหน่งแล้ว</span>' : '<span class="no-pin">ยังไม่ระบุตำแหน่ง</span>'}</div>
+    </div>`).join("") : `<p class="muted">ไม่พบผู้ขาย</p>`;
+}
+
+function drawOthers() {
+  othersLayer.clearLayers();
+  for (const s of SUPPLIERS) {
+    if (s.lat == null || s.lng == null) continue;
+    if (SELECTED && s.id === SELECTED.id) continue;
+    L.circleMarker([s.lat, s.lng], { radius: 7, color: "#1d9e75", weight: 2, fillColor: "#1d9e75", fillOpacity: 0.5 })
+      .bindTooltip(s.name, { direction: "top" })
+      .addTo(othersLayer);
+  }
+}
+
+function setPending(lat, lng) {
+  PENDING = { lat, lng };
+  if (!editMarker) {
+    editMarker = L.marker([lat, lng], { draggable: true, icon: bigPin }).addTo(map);
+    editMarker.on("dragend", () => { const p = editMarker.getLatLng(); PENDING = { lat: p.lat, lng: p.lng }; updateCoordLabel(); });
+  } else {
+    editMarker.setLatLng([lat, lng]);
+  }
+  updateCoordLabel();
+}
+
+function updateCoordLabel() {
+  document.getElementById("coord-label").textContent = PENDING ? ("พิกัด: " + fmtCoord(PENDING.lat, PENDING.lng)) : "ยังไม่ปักหมุด";
+  document.getElementById("save-btn").disabled = !PENDING || !SELECTED;
+}
+
+function selectSup(id) {
+  SELECTED = SUPPLIERS.find(s => s.id === id);
+  document.getElementById("selected-name").textContent = "กำลังระบุตำแหน่งของ: " + SELECTED.name;
+  document.getElementById("place-search").disabled = false;
+  document.getElementById("search-btn").disabled = false;
+  document.getElementById("clear-btn").disabled = (SELECTED.lat == null);
+  document.getElementById("map-status").textContent = "";
+  renderSupList();
+
+  // remove existing edit marker
+  if (editMarker) { map.removeLayer(editMarker); editMarker = null; }
+  PENDING = null;
+
+  if (SELECTED.lat != null && SELECTED.lng != null) {
+    setPending(SELECTED.lat, SELECTED.lng);
+    map.setView([SELECTED.lat, SELECTED.lng], 15);
+  } else {
+    updateCoordLabel();
+    document.getElementById("map-status").textContent = "คลิกบนแผนที่เพื่อปักหมุดตำแหน่งร้าน";
+  }
+  drawOthers();
+}
+
+async function geocode() {
+  const q = document.getElementById("place-search").value.trim();
+  if (!q) return;
+  const status = document.getElementById("map-status");
+  status.textContent = "กำลังค้นหา...";
+  try {
+    const url = "https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=th&q=" + encodeURIComponent(q);
+    const res = await fetch(url, { headers: { "Accept-Language": "th" } });
+    const data = await res.json();
+    if (!data.length) { status.textContent = "ไม่พบสถานที่ ลองพิมพ์ใหม่ หรือคลิกบนแผนที่แทน"; return; }
+    const lat = parseFloat(data[0].lat), lng = parseFloat(data[0].lon);
+    map.setView([lat, lng], 16);
+    setPending(lat, lng);
+    status.textContent = "พบ: " + (data[0].display_name || "") + " — ลากหมุดปรับตำแหน่งได้";
+  } catch (e) {
+    status.textContent = "ค้นหาไม่สำเร็จ ลองคลิกบนแผนที่แทน";
+  }
+}
+
+(async () => {
+  const user = await requireAuth();
+  if (!user) return;
+  if (!requireRole(["owner", "central_clerk"])) return;
+
+  map = L.map("map").setView(DEFAULT_CENTER, 12);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19, attribution: "&copy; OpenStreetMap"
+  }).addTo(map);
+  othersLayer = L.layerGroup().addTo(map);
+
+  map.on("click", (e) => {
+    if (!SELECTED) { document.getElementById("map-status").textContent = "เลือกผู้ขายจากรายชื่อด้านซ้ายก่อน"; return; }
+    setPending(e.latlng.lat, e.latlng.lng);
+    document.getElementById("map-status").textContent = "ปักหมุดแล้ว — กด 'บันทึกตำแหน่ง' เพื่อบันทึก (ลากหมุดปรับได้)";
+  });
+
+  const { data: sup } = await sb.from("ops_suppliers").select("id, name, phone, address, lat, lng").order("name");
+  SUPPLIERS = sup || [];
+  renderSupList();
+  drawOthers();
+  // fit map to suppliers that already have coordinates
+  const withCoords = SUPPLIERS.filter(s => s.lat != null && s.lng != null);
+  if (withCoords.length) {
+    map.fitBounds(withCoords.map(s => [s.lat, s.lng]), { padding: [40, 40], maxZoom: 15 });
+  }
+
+  document.getElementById("sup-search").addEventListener("input", renderSupList);
+  document.getElementById("search-btn").addEventListener("click", geocode);
+  document.getElementById("place-search").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); geocode(); } });
+
+  document.getElementById("save-btn").addEventListener("click", async () => {
+    if (!SELECTED || !PENDING) return;
+    const status = document.getElementById("map-status");
+    status.textContent = "กำลังบันทึก...";
+    const { error } = await sb.from("ops_suppliers").update({ lat: PENDING.lat, lng: PENDING.lng }).eq("id", SELECTED.id);
+    if (error) { status.textContent = "บันทึกไม่สำเร็จ: " + error.message; return; }
+    SELECTED.lat = PENDING.lat; SELECTED.lng = PENDING.lng;
+    const idx = SUPPLIERS.findIndex(s => s.id === SELECTED.id);
+    if (idx >= 0) { SUPPLIERS[idx].lat = PENDING.lat; SUPPLIERS[idx].lng = PENDING.lng; }
+    document.getElementById("clear-btn").disabled = false;
+    renderSupList();
+    drawOthers();
+    status.textContent = "บันทึกตำแหน่งเรียบร้อยแล้ว ✓";
+  });
+
+  document.getElementById("clear-btn").addEventListener("click", async () => {
+    if (!SELECTED) return;
+    if (!confirm("ล้างตำแหน่งของผู้ขายรายนี้?")) return;
+    const status = document.getElementById("map-status");
+    const { error } = await sb.from("ops_suppliers").update({ lat: null, lng: null }).eq("id", SELECTED.id);
+    if (error) { status.textContent = "ล้างไม่สำเร็จ: " + error.message; return; }
+    SELECTED.lat = null; SELECTED.lng = null;
+    const idx = SUPPLIERS.findIndex(s => s.id === SELECTED.id);
+    if (idx >= 0) { SUPPLIERS[idx].lat = null; SUPPLIERS[idx].lng = null; }
+    if (editMarker) { map.removeLayer(editMarker); editMarker = null; }
+    PENDING = null; updateCoordLabel();
+    document.getElementById("clear-btn").disabled = true;
+    renderSupList();
+    drawOthers();
+    status.textContent = "ล้างตำแหน่งแล้ว";
+  });
+})();
+</script>
+</body>
+</html>

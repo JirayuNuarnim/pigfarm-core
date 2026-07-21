@@ -67,6 +67,7 @@ function renderNav() {
   `;
   if (isOwner() || isCentral()) {
     links += `<a href="suppliers.html">ผู้ขาย/ประวัติราคา</a>`;
+    links += `<a href="supplier-map.html">แผนที่ผู้ขาย</a>`;
   }
   if (isOwner()) {
     links += `<a href="settings.html">ตั้งค่า/ผู้ใช้</a>`;
