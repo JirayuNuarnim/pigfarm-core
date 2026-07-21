@@ -214,7 +214,7 @@ function renderTimeline(req, approvedAt, rejected) {
 }
 
 // visual preview of the saved purchase-order document (top-left of detail page)
-function renderDocPreview(req, items, supplierName) {
+function renderDocPreview(req, items, supplierName, companyName) {
   const el = document.getElementById("doc-preview");
   if (!el) return;
   const dateStr = new Date(req.created_at).toLocaleDateString("th-TH");
@@ -226,7 +226,7 @@ function renderDocPreview(req, items, supplierName) {
     <td style="text-align:right;">${formatNumber(it.qty * it.unit_price)}</td></tr>`).join("");
   const total = (items || []).reduce((s, it) => s + it.qty * it.unit_price, 0);
   el.innerHTML = `<div class="doc-mini">
-    <div class="m-company">บริษัท เอสเจเอฟ ฟาร์ม จำกัด</div>
+    ${companyName ? `<div class="m-company">${escapeHtml(companyName)}</div>` : ""}
     <div class="m-title">ใบขอซื้อวัสดุอุปกรณ์</div>
     <div class="m-meta">
       <div>เลขที่: ${escapeHtml(req.doc_no || "#" + req.id)}<br>ฟาร์ม: ${escapeHtml(req.farm)}<br>ผู้ขาย: ${escapeHtml(supplierName || "-")}</div>
@@ -244,6 +244,7 @@ async function renderDetail() {
   if (error || !req) { main.innerHTML = `<div class="card"><h1>ไม่พบใบขอซื้อ</h1></div>`; return; }
   const { data: items } = await sb.from("ops_purchase_request_items").select("*").eq("request_id", requestId);
   const { data: suppliers } = await sb.from("ops_suppliers").select("*").order("name");
+  const { data: companies } = await sb.from("ops_companies").select("id, name").eq("active", true).order("name");
   const { data: approvals } = await sb.from("ops_approvals").select("decision, note, created_at").eq("request_id", requestId).order("created_at");
   const approvedAt = (approvals || []).find(a => a.decision === "อนุมัติ")?.created_at || null;
   const rejected = (approvals || []).find(a => a.decision === "ปฏิเสธ");
@@ -297,12 +298,25 @@ async function renderDetail() {
     </div>
 
     <div class="card">
-      <h2>ผู้ขาย</h2>
-      <select id="supplier-select" ${canPrice ? "" : "disabled"}>
-        <option value="">-- ไม่ระบุ --</option>
-        ${(suppliers || []).map(s => `<option value="${s.id}" ${req.supplier_id == s.id ? "selected" : ""}>${escapeHtml(s.name)}${s.phone ? " (" + escapeHtml(s.phone) + ")" : ""}</option>`).join("")}
-      </select>
-      ${canPrice ? '<button class="btn small" id="save-supplier-btn" style="margin-top:8px;">บันทึกผู้ขาย</button>' : ""}
+      <h2>บริษัท (หัวบิล) / ผู้ขาย</h2>
+      <div class="row" style="gap:16px; flex-wrap:wrap;">
+        <div class="field" style="flex:1; min-width:220px;">
+          <label>ชื่อบริษัท (หัวบิล)</label>
+          <select id="company-select" ${canEdit ? "" : "disabled"}>
+            <option value="">— ไม่ระบุ —</option>
+            ${(companies || []).map(c => `<option value="${c.id}" ${req.company_id == c.id ? "selected" : ""}>${escapeHtml(c.name)}</option>`).join("")}
+          </select>
+          ${canEdit ? '<button class="btn small" id="save-company-btn" style="margin-top:8px;">บันทึกบริษัท</button>' : ""}
+        </div>
+        <div class="field" style="flex:1; min-width:220px;">
+          <label>ผู้ขาย</label>
+          <select id="supplier-select" ${canEdit ? "" : "disabled"}>
+            <option value="">-- ไม่ระบุ --</option>
+            ${(suppliers || []).map(s => `<option value="${s.id}" ${req.supplier_id == s.id ? "selected" : ""}>${escapeHtml(s.name)}${s.phone ? " (" + escapeHtml(s.phone) + ")" : ""}</option>`).join("")}
+          </select>
+          ${canEdit ? '<button class="btn small" id="save-supplier-btn" style="margin-top:8px;">บันทึกผู้ขาย</button>' : ""}
+        </div>
+      </div>
     </div>
 
     <div class="card" id="items-card">
@@ -352,7 +366,15 @@ async function renderDetail() {
   `;
 
   const supplierName = (suppliers || []).find(s => s.id == req.supplier_id)?.name || "";
-  renderDocPreview(req, items, supplierName);
+  const companyName = (companies || []).find(c => c.id == req.company_id)?.name || "";
+  renderDocPreview(req, items, supplierName, companyName);
+
+  document.getElementById("save-company-btn")?.addEventListener("click", async () => {
+    const companyId = document.getElementById("company-select").value || null;
+    const { error } = await sb.from("ops_purchase_requests").update({ company_id: companyId }).eq("id", requestId);
+    document.getElementById("action-status").textContent = error ? "บันทึกไม่สำเร็จ" : "บันทึกบริษัทแล้ว";
+    if (!error) renderDetail();
+  });
 
   // click the document preview (or the edit button) to jump to the editable items
   if (canEdit) {

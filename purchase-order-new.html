@@ -79,6 +79,12 @@
       <div class="panel p2">
         <div class="panel-head">2 · บิลใบขอซื้อ</div>
         <div class="panel-body">
+          <div class="field"><label>ชื่อบริษัท (หัวบิล)</label>
+            <div style="display:flex; gap:6px;">
+              <select id="company" class="flat-input" style="margin-bottom:0;"></select>
+              <button class="btn small secondary" id="add-company-btn" type="button" style="white-space:nowrap;">+ เพิ่ม</button>
+            </div>
+          </div>
           <div class="row" style="gap:10px;">
             <div class="field" style="flex:1;"><label>ฟาร์ม</label><select id="farm" class="flat-input"></select></div>
             <div class="field" style="flex:1;"><label>ผู้ขาย</label><input type="text" id="bill-supplier" class="flat-input" readonly placeholder="— เลือกจากช่อง 1 —"></div>
@@ -244,9 +250,11 @@ function renderPreview() {
     <td style="text-align:right;">${formatNumber(b.price)}</td>
     <td style="text-align:right;">${formatNumber(b.qty * b.price)}</td></tr>`).join("");
   const total = BILL.reduce((s, b) => s + b.qty * b.price, 0);
+  const compSel = document.getElementById("company");
+  const companyName = (compSel && compSel.value) ? compSel.selectedOptions[0].textContent.trim() : "";
   el.innerHTML = `
     <div class="doc-mini">
-      <div class="m-company">บริษัท เอสเจเอฟ ฟาร์ม จำกัด</div>
+      ${companyName ? `<div class="m-company">${escapeHtml(companyName)}</div>` : ""}
       <div class="m-title">ใบขอซื้อวัสดุอุปกรณ์</div>
       <div class="m-meta">
         <div>เลขที่: <i style="color:#888;">(ออกเลขเมื่อบันทึก)</i><br>ฟาร์ม: ${escapeHtml(farm)}<br>ผู้ขาย: ${escapeHtml(supplier)}</div>
@@ -292,6 +300,22 @@ function renderAttachedDocs() {
   if (canSeeAllFarms()) { const { data } = await sb.from("farms").select("name").order("name"); farms = (data || []).map(f => f.name); }
   else farms = myFarms();
   farmSel.innerHTML = farms.map(f => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join("");
+
+  const companySel = document.getElementById("company");
+  async function loadCompanies(selectId) {
+    const { data } = await sb.from("ops_companies").select("id, name").eq("active", true).order("name");
+    companySel.innerHTML = `<option value="">— ไม่ระบุ —</option>` + (data || []).map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join("");
+    if (selectId) companySel.value = selectId;
+    renderPreview();
+  }
+  await loadCompanies();
+  companySel.addEventListener("change", renderPreview);
+  document.getElementById("add-company-btn").addEventListener("click", async () => {
+    const name = prompt("ชื่อบริษัทใหม่ (หัวบิล)"); if (!name || !name.trim()) return;
+    const { data, error } = await sb.from("ops_companies").insert({ name: name.trim() }).select("id").single();
+    if (error) { alert("เพิ่มบริษัทไม่สำเร็จ: " + error.message); return; }
+    await loadCompanies(data.id);
+  });
 
   const domainOpts = (canSeeAllFarms() ? Object.keys(DOMAIN_LABELS) : myDomains());
   document.getElementById("manual-domain").innerHTML = domainOpts.map(d => `<option value="${d}">${DOMAIN_LABELS[d] || d}</option>`).join("");
@@ -374,6 +398,7 @@ function renderAttachedDocs() {
     const requestedBy = document.getElementById("requested-by").value.trim();
     const note = document.getElementById("note").value.trim();
     const supplierId = SELECTED_SUPPLIER ? SELECTED_SUPPLIER.id : null;
+    const companyId = document.getElementById("company").value || null;
 
     statusEl.textContent = "กำลังบันทึก...";
     // resolve/create catalog items for typed-in names, and add them to this supplier's catalog
@@ -390,7 +415,7 @@ function renderAttachedDocs() {
     for (const domain of Object.keys(byDomain)) {
       const { data: docNo } = await sb.rpc("ops_next_doc_no", { p_doc_type: "purchase", p_farm: farm });
       const { data: req, error } = await sb.from("ops_purchase_requests").insert({
-        doc_no: docNo, farm, domain, requested_by: requestedBy, supplier_id: supplierId, note,
+        doc_no: docNo, farm, domain, requested_by: requestedBy, supplier_id: supplierId, company_id: companyId, note,
       }).select().single();
       if (error) { statusEl.textContent = "บันทึกไม่สำเร็จ: " + error.message; return; }
       const items = byDomain[domain].map(b => ({

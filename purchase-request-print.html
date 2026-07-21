@@ -25,7 +25,7 @@
     <div id="qrcode"></div>
     <div class="cap"><span class="doc-no" id="qr-doc-no"></span><br>สแกนเพื่ออัปเดตสถานะเอกสาร</div>
   </div>
-  <div class="doc-company">บริษัท เอสเจเอฟ ฟาร์ม จำกัด</div>
+  <div class="doc-company" id="doc-company"></div>
   <div class="doc-title">ใบขอซื้อวัสดุอุปกรณ์</div>
   <div class="doc-meta">
     <div id="meta-left"></div>
@@ -64,6 +64,11 @@
   const { data: req } = await sb.from("ops_purchase_requests").select("*").eq("id", id).single();
   if (!req) return;
   document.getElementById("qr-doc-no").textContent = req.doc_no || ("#" + req.id);
+
+  if (req.company_id) {
+    const { data: company } = await sb.from("ops_companies").select("name").eq("id", req.company_id).single();
+    document.getElementById("doc-company").textContent = company ? company.name : "";
+  }
   const { data: items } = await sb.from("ops_purchase_request_items").select("*").eq("request_id", id);
   let supplierName = "";
   if (req.supplier_id) {
