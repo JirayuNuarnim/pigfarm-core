@@ -85,6 +85,7 @@ const STAGES = [
   { key: "ordered",   label: "สั่งซื้อแล้ว",    statuses: ["สั่งซื้อแล้ว"] },
   { key: "received",  label: "รับของแล้ว",      statuses: ["รับของแล้ว"] },
   { key: "other",     label: "ปฏิเสธ/สั่งเอง",  statuses: ["ปฏิเสธ", "สั่งเองไม่ผ่านอนุมัติ"] },
+  { key: "voided",    label: "🗑️ เอกสารที่ถูกทิ้ง", statuses: ["ยกเลิก"] },
 ];
 
 // attachment categories
@@ -248,13 +249,15 @@ async function renderDetail() {
   const rejected = (approvals || []).find(a => a.decision === "ปฏิเสธ");
   const userId = (await sb.auth.getUser()).data.user.id;
 
-  const canPrice = isOwner() || isCentral();
-  const canApprove = isOwner() && req.status === "รออนุมัติเจ้าของ";
-  const canSubmitForApproval = (isOwner() || isCentral()) && req.status === "รอเสมียนกลาง";
-  const canMarkOrdered = (isOwner() || isCentral()) && req.status === "อนุมัติแล้ว";
-  const canMarkReceived = (isOwner() || isCentral()) && req.status === "สั่งซื้อแล้ว";
-  const canSelfOrder = myFarms().includes(req.farm) && ["รอเสมียนกลาง"].includes(req.status);
+  const isVoided = req.status === "ยกเลิก";
   const canManage = isOwner() || isCentral();
+  const canEdit = canManage && (!isVoided || isOwner());   // voided docs: only the owner may edit
+  const canPrice = canEdit;
+  const canApprove = isOwner() && req.status === "รออนุมัติเจ้าของ";
+  const canSubmitForApproval = canEdit && req.status === "รอเสมียนกลาง";
+  const canMarkOrdered = canEdit && req.status === "อนุมัติแล้ว";
+  const canMarkReceived = canEdit && req.status === "สั่งซื้อแล้ว";
+  const canSelfOrder = myFarms().includes(req.farm) && ["รอเสมียนกลาง"].includes(req.status);
 
   main.innerHTML = `
     <div class="page-header">
@@ -266,9 +269,20 @@ async function renderDetail() {
       </div>
     </div>
 
+    ${isVoided ? `
+    <div class="card" style="border:2px solid #d9534f; background:#fdf3f2;">
+      <h2 style="color:#d9534f; margin-top:0;">🗑️ เอกสารนี้ถูกยกเลิก / ทิ้งแล้ว</h2>
+      <p style="margin:4px 0;">เก็บไว้เป็นหลักฐาน — แก้ไขไม่ได้ (เฉพาะเจ้าของเท่านั้นที่จัดการได้)</p>
+      ${req.void_reason ? `<p style="margin:4px 0;"><b>เหตุผล:</b> ${escapeHtml(req.void_reason)}</p>` : ""}
+      ${req.voided_at ? `<p class="muted" style="margin:4px 0;">ยกเลิกเมื่อ ${fmtDT(req.voided_at)}</p>` : ""}
+    </div>` : ""}
+
     <div class="preview-row">
       <div class="pv-panel">
-        <div class="pv-head blue">👁️ ตัวอย่างเอกสาร</div>
+        <div class="pv-head blue" style="display:flex; justify-content:space-between; align-items:center;">
+          <span>👁️ ตัวอย่างเอกสาร</span>
+          ${canEdit ? '<button class="btn small" id="edit-doc-btn" style="padding:4px 10px; background:#fff; color:#2b6cb0;">✏️ แก้ไขรายการ</button>' : ""}
+        </div>
         <div class="pv-body"><div id="doc-preview"></div></div>
       </div>
       <div class="pv-panel">
@@ -291,24 +305,25 @@ async function renderDetail() {
       ${canPrice ? '<button class="btn small" id="save-supplier-btn" style="margin-top:8px;">บันทึกผู้ขาย</button>' : ""}
     </div>
 
-    <div class="card">
-      <h2>รายการ</h2>
+    <div class="card" id="items-card">
+      <h2>รายการ ${canEdit ? '<span class="muted" style="font-size:13px; font-weight:normal;">— เสมียนกลางแก้ไขได้: ชื่อรายการ / จำนวน / ราคา / ตัดออก</span>' : ""}</h2>
       <table>
-        <thead><tr><th>รายการ</th><th>จำนวน</th><th>หน่วย</th><th>ราคา/หน่วย</th><th>รวม</th>${canPrice ? "<th></th>" : ""}</tr></thead>
+        <thead><tr><th>รายการ</th><th>จำนวน</th><th>หน่วย</th><th>ราคา/หน่วย</th><th>รวม</th>${canEdit ? "<th></th>" : ""}</tr></thead>
         <tbody id="items-body">
           ${(items || []).map(it => `
             <tr data-id="${it.id}">
-              <td>${escapeHtml(it.description)}</td>
-              <td class="text-right">${canPrice ? `<input type="number" step="0.01" class="pr-qty" value="${it.qty}" style="width:70px;">` : formatNumber(it.qty, 0)}</td>
+              <td>${canEdit ? `<input type="text" class="pr-desc" value="${escapeHtml(it.description)}" style="width:100%; min-width:150px;">` : escapeHtml(it.description)}</td>
+              <td class="text-right">${canEdit ? `<input type="number" step="0.01" class="pr-qty" value="${it.qty}" style="width:70px;">` : formatNumber(it.qty, 0)}</td>
               <td>${escapeHtml(it.unit || "")}</td>
-              <td class="text-right">${canPrice ? `<input type="number" step="0.01" class="pr-price" value="${it.unit_price}" style="width:90px;">` : formatNumber(it.unit_price)}</td>
+              <td class="text-right">${canEdit ? `<input type="number" step="0.01" class="pr-price" value="${it.unit_price}" style="width:90px;">` : formatNumber(it.unit_price)}</td>
               <td class="text-right">${formatNumber(it.qty * it.unit_price)}</td>
-              ${canPrice ? `<td><button class="btn small save-price-btn">บันทึก</button></td>` : ""}
+              ${canEdit ? `<td style="white-space:nowrap;"><button class="btn small save-price-btn">บันทึก</button> <button class="btn small danger del-item-btn">ตัดออก</button></td>` : ""}
             </tr>
           `).join("")}
-          <tr><td colspan="4" class="text-right"><b>รวมทั้งหมด</b></td><td class="text-right"><b>${formatNumber((items || []).reduce((s, it) => s + it.qty * it.unit_price, 0))}</b></td>${canPrice ? "<td></td>" : ""}</tr>
+          <tr><td colspan="4" class="text-right"><b>รวมทั้งหมด</b></td><td class="text-right"><b>${formatNumber((items || []).reduce((s, it) => s + it.qty * it.unit_price, 0))}</b></td>${canEdit ? "<td></td>" : ""}</tr>
         </tbody>
       </table>
+      ${canEdit ? '<button class="btn small secondary" id="add-item-btn" style="margin-top:10px;">+ เพิ่มรายการ</button>' : ""}
     </div>
 
     <div class="card">
@@ -319,10 +334,13 @@ async function renderDetail() {
         ${canMarkOrdered ? '<button class="btn" id="ordered-btn">บันทึกว่าสั่งซื้อแล้ว</button>' : ""}
         ${canMarkReceived ? '<button class="btn" id="received-btn">บันทึกว่ารับของแล้ว</button>' : ""}
         ${canSelfOrder ? '<button class="btn secondary" id="self-order-btn">สั่งเอง ไม่ผ่านอนุมัติ</button>' : ""}
-        ${canManage ? (req.paid_at
+        ${canEdit ? (req.paid_at
           ? '<button class="btn secondary small" id="unpaid-btn">ยกเลิกสถานะจ่ายแล้ว</button>'
           : '<button class="btn small" id="paid-btn">💰 ทำเครื่องหมายว่าจ่ายแล้ว</button>') : ""}
+        ${(canManage && !isVoided) ? '<button class="btn danger small" id="void-btn">🗑️ ยกเลิกบิลนี้ (ทิ้ง)</button>' : ""}
+        ${(isVoided && isOwner()) ? '<button class="btn small" id="restore-btn">↩️ กู้คืนเอกสาร (เจ้าของ)</button>' : ""}
       </div>
+      ${isVoided ? '<p class="muted" style="margin-top:8px;">เอกสารถูกทิ้งแล้ว — ดูอยู่ในหมวด "🗑️ เอกสารที่ถูกทิ้ง"</p>' : ""}
       <div id="action-status" class="muted" style="margin-top:10px;"></div>
     </div>
 
@@ -336,6 +354,14 @@ async function renderDetail() {
   const supplierName = (suppliers || []).find(s => s.id == req.supplier_id)?.name || "";
   renderDocPreview(req, items, supplierName);
 
+  // click the document preview (or the edit button) to jump to the editable items
+  if (canEdit) {
+    const jump = () => document.getElementById("items-card").scrollIntoView({ behavior: "smooth", block: "start" });
+    document.getElementById("edit-doc-btn")?.addEventListener("click", jump);
+    const dp = document.getElementById("doc-preview");
+    if (dp) { dp.style.cursor = "pointer"; dp.title = "กดเพื่อแก้ไขรายการ"; dp.addEventListener("click", jump); }
+  }
+
   document.getElementById("save-supplier-btn")?.addEventListener("click", async () => {
     const supplierId = document.getElementById("supplier-select").value || null;
     const { error } = await sb.from("ops_purchase_requests").update({ supplier_id: supplierId }).eq("id", requestId);
@@ -346,11 +372,29 @@ async function renderDetail() {
   document.querySelectorAll(".save-price-btn").forEach(btn => {
     btn.addEventListener("click", async () => {
       const row = btn.closest("tr");
+      const description = row.querySelector(".pr-desc").value.trim();
       const qty = parseFloat(row.querySelector(".pr-qty").value) || 0;
       const price = parseFloat(row.querySelector(".pr-price").value) || 0;
-      const { error } = await sb.from("ops_purchase_request_items").update({ qty, unit_price: price }).eq("id", row.dataset.id);
+      const { error } = await sb.from("ops_purchase_request_items").update({ description, qty, unit_price: price }).eq("id", row.dataset.id);
+      document.getElementById("action-status").textContent = error ? ("บันทึกไม่สำเร็จ: " + error.message) : "บันทึกรายการแล้ว";
       if (!error) renderDetail();
     });
+  });
+
+  document.querySelectorAll(".del-item-btn").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const row = btn.closest("tr");
+      if (!confirm("ตัดรายการนี้ออกจากใบขอซื้อ?")) return;
+      const { error } = await sb.from("ops_purchase_request_items").delete().eq("id", row.dataset.id);
+      document.getElementById("action-status").textContent = error ? ("ตัดออกไม่สำเร็จ: " + error.message) : "ตัดรายการออกแล้ว";
+      if (!error) renderDetail();
+    });
+  });
+
+  document.getElementById("add-item-btn")?.addEventListener("click", async () => {
+    const { error } = await sb.from("ops_purchase_request_items").insert({ request_id: requestId, description: "รายการใหม่", qty: 1, unit: "", unit_price: 0 });
+    document.getElementById("action-status").textContent = error ? ("เพิ่มไม่สำเร็จ: " + error.message) : "เพิ่มรายการแล้ว — แก้ไขชื่อ/จำนวน/ราคาได้เลย";
+    if (!error) renderDetail();
   });
 
   const statusEl = document.getElementById("action-status");
@@ -383,6 +427,22 @@ async function renderDetail() {
   });
   document.getElementById("unpaid-btn")?.addEventListener("click", async () => {
     const { error } = await sb.from("ops_purchase_requests").update({ paid_at: null }).eq("id", requestId);
+    if (!error) renderDetail();
+  });
+
+  document.getElementById("void-btn")?.addEventListener("click", async () => {
+    const reason = prompt("เหตุผลที่ยกเลิก/ทิ้งเอกสารนี้ (เก็บเป็นหลักฐาน):");
+    if (reason === null) return;
+    if (!confirm("ยืนยันยกเลิกบิลนี้? เอกสารจะถูกย้ายไปหมวด \"เอกสารที่ถูกทิ้ง\" และแก้ไขไม่ได้อีก (ยกเว้นเจ้าของ)")) return;
+    const { error } = await sb.from("ops_purchase_requests").update({ status: "ยกเลิก", voided_at: nowISO(), voided_by: userId, void_reason: reason }).eq("id", requestId);
+    statusEl.textContent = error ? ("ยกเลิกไม่สำเร็จ: " + error.message) : "ยกเลิกเอกสารแล้ว";
+    if (!error) renderDetail();
+  });
+
+  document.getElementById("restore-btn")?.addEventListener("click", async () => {
+    if (!confirm("กู้คืนเอกสารนี้กลับมาแก้ไขได้? (กลับสู่สถานะ รอเสมียนกลาง)")) return;
+    const { error } = await sb.from("ops_purchase_requests").update({ status: "รอเสมียนกลาง", voided_at: null, voided_by: null, void_reason: null }).eq("id", requestId);
+    statusEl.textContent = error ? ("กู้คืนไม่สำเร็จ: " + error.message) : "กู้คืนเอกสารแล้ว";
     if (!error) renderDetail();
   });
 
