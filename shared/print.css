@@ -1,7 +1,12 @@
 body { font-family: "TH Sarabun New", "Leelawadee UI", "Tahoma", sans-serif; font-size: 16px; color: #000; margin: 0; }
-.print-page { width: 210mm; min-height: 280mm; margin: 0 auto; padding: 14mm 16mm; box-sizing: border-box; }
-.toolbar { text-align: center; padding: 14px; }
-.toolbar button { font-size: 16px; padding: 10px 24px; border-radius: 6px; border: none; background: #3a6b4c; color: #fff; cursor: pointer; }
+
+/* A4 sheet — same box on screen and paper */
+.print-page { width: 210mm; min-height: 297mm; margin: 0 auto; padding: 14mm 16mm; box-sizing: border-box; background: #fff; }
+
+.toolbar { text-align: center; padding: 12px; background: #2b2f2c; position: sticky; top: 0; z-index: 20; display: flex; gap: 12px; justify-content: center; align-items: center; flex-wrap: wrap; }
+.toolbar button, .toolbar a.tb-btn { font-size: 16px; padding: 10px 24px; border-radius: 6px; border: none; background: #3a6b4c; color: #fff; cursor: pointer; text-decoration: none; }
+.toolbar a.tb-btn.secondary { background: #6b7280; }
+.toolbar .tb-hint { color: #cfd4d0; font-size: 14px; }
 
 .doc-company { text-align: center; font-size: 20px; font-weight: bold; margin-bottom: 2px; }
 .doc-title { text-align: center; font-size: 22px; font-weight: bold; margin: 6px 0 14px; text-decoration: underline; }
@@ -21,8 +26,18 @@ table.doc-table td.num { text-align: right; }
 .signatures .sig { width: 30%; }
 .signatures .line { border-bottom: 1px dotted #000; margin-bottom: 6px; height: 40px; }
 
+/* screen: show the sheet floating on a gray "desk" so you preview exactly what prints */
+@media screen {
+  body { background: #525659; }
+  .print-page { box-shadow: 0 2px 12px rgba(0,0,0,.5); margin: 18px auto; }
+}
+
 @media print {
   .toolbar { display: none; }
-  .print-page { width: auto; margin: 0; padding: 8mm 12mm; }
-  @page { size: A4; margin: 10mm; }
+  body { background: #fff; }
+  .print-page { width: auto; min-height: auto; margin: 0; padding: 0; box-shadow: none; }
+  table.doc-table { page-break-inside: auto; }
+  table.doc-table tr { page-break-inside: avoid; }
+  .signatures { page-break-inside: avoid; }
+  @page { size: A4; margin: 14mm 16mm; }
 }

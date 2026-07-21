@@ -15,7 +15,11 @@
 </style>
 </head>
 <body>
-<div class="toolbar"><button onclick="window.print()">🖨️ พิมพ์</button></div>
+<div class="toolbar">
+  <a class="tb-btn secondary" id="back-btn" href="#">← กลับ</a>
+  <button onclick="window.print()">🖨️ พิมพ์</button>
+  <span class="tb-hint">ตัวอย่างก่อนพิมพ์ — ขนาดกระดาษ A4 (ด้านล่างคือหน้าจริงที่จะพิมพ์)</span>
+</div>
 <div class="print-page" style="position:relative;">
   <div id="qr-corner">
     <div id="qrcode"></div>
@@ -44,6 +48,7 @@
 (async () => {
   const params = new URLSearchParams(window.location.search);
   const id = params.get("id");
+  document.getElementById("back-btn").href = "purchase-request.html?id=" + encodeURIComponent(id);
 
   // QR encodes the absolute URL to this request's detail page (timeline + status buttons)
   const trackUrl = new URL("purchase-request.html?id=" + encodeURIComponent(id), window.location.href).href;
