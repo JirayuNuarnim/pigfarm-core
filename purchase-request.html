@@ -60,13 +60,16 @@
   .qt-gallery { display:grid; grid-template-columns:repeat(auto-fill, minmax(96px,1fr)); gap:8px; }
   .qt-thumb img { width:100%; height:96px; object-fit:cover; border-radius:6px; border:1px solid var(--stroke); cursor:pointer; background:var(--bg); }
   .qt-empty { color:var(--dim); font-size:13px; }
-  /* A4 document deck (stacked papers) */
-  .deck { display:flex; overflow-x:auto; overflow-y:visible; padding:22px 10px 30px; }
-  .paper { flex:0 0 auto; width:190px; height:269px; background:#f6f8fc; color:#0c1424; border:1px solid #cdd7ea; border-radius:8px;
-    box-shadow:0 8px 22px -8px rgba(0,0,0,.65); margin-left:-108px; padding:11px 12px 10px; position:relative; overflow:hidden; cursor:pointer;
-    transition:transform .18s, box-shadow .18s; }
-  .paper:first-child { margin-left:0; }
-  .paper:hover { transform:translateY(-16px); z-index:30; box-shadow:0 18px 40px -10px rgba(47,224,207,.55); border-color:var(--cyan); }
+  /* A4 document board — grouped by status (kanban) */
+  .deck { display:flex; gap:16px; overflow-x:auto; padding:10px 2px 24px; align-items:flex-start; }
+  .deck-col { flex:0 0 auto; width:214px; background:rgba(255,255,255,.02); border:1px solid var(--stroke); border-radius:14px; padding:10px 10px 8px; }
+  .deck-col-head { font-weight:700; font-size:13px; padding-bottom:8px; border-bottom:2px solid var(--stroke-2); margin-bottom:12px; display:flex; align-items:center; gap:8px; }
+  .deck-col-head .cdot { width:10px; height:10px; border-radius:50%; flex:0 0 auto; box-shadow:0 0 8px currentColor; }
+  .deck-col-head .cnt { margin-left:auto; background:var(--panel-2); border:1px solid var(--stroke); border-radius:10px; padding:0 8px; font-size:12px; }
+  .deck-col-body { display:flex; flex-direction:column; gap:12px; max-height:620px; overflow-y:auto; padding-right:2px; }
+  .paper { width:100%; height:248px; background:#f6f8fc; color:#0c1424; border:1px solid #cdd7ea; border-top:4px solid var(--pc,#888); border-radius:8px;
+    box-shadow:0 6px 16px -8px rgba(0,0,0,.6); padding:10px 12px; position:relative; overflow:hidden; cursor:pointer; transition:transform .15s, box-shadow .15s; }
+  .paper:hover { transform:translateY(-4px); box-shadow:0 12px 26px -10px rgba(47,224,207,.5); }
   .paper .p-top { display:flex; justify-content:space-between; align-items:center; gap:4px; }
   .paper .p-doc { font-family:var(--font-mono); font-weight:bold; font-size:11px; }
   .paper .p-status { font-size:9px; padding:1px 7px; border-radius:8px; background:#e0e6e2; color:#444; white-space:nowrap; }
@@ -78,8 +81,8 @@
   .paper table { width:100%; border-collapse:collapse; margin-top:5px; }
   .paper td { font-size:9px; border-bottom:1px solid #e4e9f3; padding:1px 2px; color:#1a2436; }
   .paper td:last-child { text-align:right; }
-  .paper .p-total { font-family:var(--font-mono); font-size:10.5px; font-weight:bold; text-align:right; margin-top:5px; position:absolute; bottom:8px; right:12px; left:12px; border-top:1px solid #c9d3e6; padding-top:4px; }
-  .paper .p-paid { position:absolute; bottom:26px; right:10px; color:#1e5c33; font-weight:bold; font-size:11px; border:1.5px solid #1e5c33; border-radius:4px; padding:0 4px; transform:rotate(-12deg); opacity:.85; }
+  .paper .p-total { font-family:var(--font-mono); font-size:10.5px; font-weight:bold; text-align:right; position:absolute; bottom:8px; right:12px; left:12px; border-top:1px solid #c9d3e6; padding-top:4px; }
+  .paper .p-paid { position:absolute; bottom:28px; right:10px; color:#1e5c33; font-weight:bold; font-size:11px; border:1.5px solid #1e5c33; border-radius:4px; padding:0 4px; transform:rotate(-12deg); opacity:.85; }
 </style>
 </head>
 <body data-page="purchase-request">
@@ -160,7 +163,7 @@ function renderList() {
       <thead><tr><th>เลขที่</th><th>ฟาร์ม</th><th>หมวด</th><th>ผู้ขอ</th><th>วันที่</th><th>สถานะ</th><th>จ่ายเงิน</th><th>แนบ</th><th></th></tr></thead>
       <tbody id="pr-rows"><tr><td colspan="9" class="muted">กำลังโหลด...</td></tr></tbody>
     </table>
-    <h2 style="margin-top:24px;">📄 เอกสาร (มุมมองกระดาษ) <span class="muted" style="font-size:13px; font-weight:normal;">— เลื่อนแนวนอนเพื่อดู · ชี้เพื่อยกขึ้น · กดเพื่อเปิด</span></h2>
+    <h2 style="margin-top:24px;">📄 เอกสารแยกตามสถานะ <span class="muted" style="font-size:13px; font-weight:normal;">— แต่ละคอลัมน์คือขั้นตอน · เห็นทุกใบ · กดเพื่อเปิด</span></h2>
     <div class="deck" id="pr-deck"></div>
   `;
   document.getElementById("new-btn").addEventListener("click", () => window.location.href = "purchase-order-new.html");
@@ -179,26 +182,37 @@ function renderTabs() {
   }));
 }
 
+const STAGE_COLOR = { wait_c: "#ffb457", wait_o: "#ff9f45", approved: "#2fe0cf", ordered: "#8b6dff", received: "#38e08a", other: "#ff6274", voided: "#6b7280" };
+
+function paperCard(r) {
+  const items = ITEMS_BY_PR[r.id] || [];
+  const total = items.reduce((s, it) => s + it.qty * it.unit_price, 0);
+  const cls = STATUS_BADGE_CLASS[r.status] || "";
+  const rowsHtml = items.slice(0, 5).map(it => `<tr><td>${escapeHtml((it.description || "").slice(0, 20))}</td><td>${formatNumber(it.qty, 0)}</td></tr>`).join("")
+    + (items.length > 5 ? `<tr><td colspan="2" style="color:#8a97b2;">…อีก ${items.length - 5} รายการ</td></tr>` : "");
+  const color = STAGE_COLOR[stageOf(r.status)] || "#888";
+  return `<div class="paper" style="--pc:${color}" onclick="location.href='purchase-request.html?id=${r.id}'" title="${escapeHtml(r.doc_no || "")} · ${escapeHtml(r.status)}">
+    <div class="p-top"><span class="p-doc">${escapeHtml(r.doc_no || "#" + r.id)}</span><span class="p-status ${cls}">${escapeHtml(r.status)}</span></div>
+    <div class="p-title">ใบขอซื้อ</div>
+    <div class="p-meta">${escapeHtml(r.farm || "")}<br>${escapeHtml(DOMAIN_LABELS[r.domain] || r.domain)} · ${new Date(r.created_at).toLocaleDateString("th-TH")}</div>
+    <table>${rowsHtml || '<tr><td>—</td></tr>'}</table>
+    ${r.paid_at ? '<div class="p-paid">จ่ายแล้ว</div>' : ""}
+    <div class="p-total">รวม ${formatNumber(total)} ฿</div>
+  </div>`;
+}
+
+// group the papers into columns by status (kanban) — each fully visible with its stage colour
 function renderDeck(rows) {
-  const deck = document.getElementById("pr-deck");
-  if (!deck) return;
-  const list = rows.slice(0, 40);
-  if (!list.length) { deck.innerHTML = `<p class="muted" style="padding:16px;">ไม่มีเอกสาร</p>`; return; }
-  deck.innerHTML = list.map(r => {
-    const items = ITEMS_BY_PR[r.id] || [];
-    const total = items.reduce((s, it) => s + it.qty * it.unit_price, 0);
-    const cls = STATUS_BADGE_CLASS[r.status] || "";
-    const rowsHtml = items.slice(0, 6).map(it => `<tr><td>${escapeHtml((it.description || "").slice(0, 22))}</td><td>${formatNumber(it.qty, 0)}</td></tr>`).join("")
-      + (items.length > 6 ? `<tr><td colspan="2" style="color:#8a97b2;">…อีก ${items.length - 6} รายการ</td></tr>` : "");
-    return `<div class="paper" onclick="location.href='purchase-request.html?id=${r.id}'" title="${escapeHtml(r.doc_no || "")} · ${escapeHtml(r.status)}">
-      <div class="p-top"><span class="p-doc">${escapeHtml(r.doc_no || "#" + r.id)}</span><span class="p-status ${cls}">${escapeHtml(r.status)}</span></div>
-      <div class="p-title">ใบขอซื้อ</div>
-      <div class="p-meta">${escapeHtml(r.farm || "")}<br>${escapeHtml(DOMAIN_LABELS[r.domain] || r.domain)} · ${new Date(r.created_at).toLocaleDateString("th-TH")}</div>
-      <table>${rowsHtml || '<tr><td>—</td></tr>'}</table>
-      ${r.paid_at ? '<div class="p-paid">จ่ายแล้ว</div>' : ""}
-      <div class="p-total">รวม ${formatNumber(total)} ฿</div>
-    </div>`;
-  }).join("");
+  const board = document.getElementById("pr-deck");
+  if (!board) return;
+  const groups = {};
+  rows.forEach(r => { const k = stageOf(r.status); (groups[k] = groups[k] || []).push(r); });
+  const cols = STAGES.filter(s => s.key !== "all" && groups[s.key] && groups[s.key].length);
+  board.innerHTML = cols.length ? cols.map(s => `
+    <div class="deck-col">
+      <div class="deck-col-head" style="color:${STAGE_COLOR[s.key] || "#888"}"><span class="cdot" style="background:${STAGE_COLOR[s.key] || "#888"}"></span><span style="color:var(--text)">${escapeHtml(s.label)}</span><span class="cnt">${groups[s.key].length}</span></div>
+      <div class="deck-col-body">${groups[s.key].map(paperCard).join("")}</div>
+    </div>`).join("") : `<p class="muted" style="padding:16px;">ไม่มีเอกสาร</p>`;
 }
 
 function renderRows() {
