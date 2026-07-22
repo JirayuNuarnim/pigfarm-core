@@ -62,6 +62,9 @@ async function renderDetail() {
   const totalDeduct = (deductions || []).reduce((s, d) => s + Number(d.amount), 0);
   const net = gross - totalDeduct;
   const canManage = isOwner() || isCentral();
+  const isLocked = ["อนุมัติแล้ว", "จ่ายแล้ว"].includes(job.status);  // อนุมัติแล้ว = ห้ามแก้เนื้อหา (DB trigger บังคับด้วย)
+  // เดินหน้าได้อย่างเดียว: ถอยสถานะกลับได้เฉพาะเจ้าของ
+  const statusChoices = ["รอตรวจ", "อนุมัติแล้ว", "จ่ายแล้ว"].filter(s => !isLocked || isOwner() || s !== "รอตรวจ");
 
   main.innerHTML = `
     <div class="page-header">
@@ -73,9 +76,10 @@ async function renderDetail() {
     <div class="card">
       <p>สถานะปัจจุบัน: <span class="badge ${STATUS_BADGE_CLASS[job.status] || ""}">${escapeHtml(job.status)}</span></p>
       <select id="status-select">
-        ${["รอตรวจ", "อนุมัติแล้ว", "จ่ายแล้ว"].map(s => `<option value="${s}" ${job.status === s ? "selected" : ""}>${s}</option>`).join("")}
+        ${statusChoices.map(s => `<option value="${s}" ${job.status === s ? "selected" : ""}>${s}</option>`).join("")}
       </select>
       <button class="btn small" id="update-status-btn">อัปเดตสถานะ</button>
+      ${isLocked ? '<p class="muted" style="margin:8px 0 0;">🔒 ใบส่งงานนี้อนุมัติแล้ว — แก้ไขเนื้อหา/รายการไม่ได้</p>' : ""}
     </div>` : `<p>สถานะปัจจุบัน: <span class="badge ${STATUS_BADGE_CLASS[job.status] || ""}">${escapeHtml(job.status)}</span></p>`}
 
     <div class="card">
