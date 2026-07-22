@@ -14,6 +14,24 @@ const SUPABASE_KEY = "sb_publishable_08HO-fBjfWEN_XNTFEp6ow_9JJzZSj9";
     p.rel = rel; p.href = SUPABASE_URL; p.crossOrigin = "anonymous";
     document.head.appendChild(p);
   }
+
+  // PWA: installable app + standalone window + theme color
+  if (!document.querySelector('link[rel="manifest"]')) {
+    const m = document.createElement("link");
+    m.rel = "manifest"; m.href = "manifest.json";
+    document.head.appendChild(m);
+  }
+  if (!document.querySelector('meta[name="theme-color"]')) {
+    const t = document.createElement("meta");
+    t.name = "theme-color"; t.content = "#0b1120";
+    document.head.appendChild(t);
+  }
+  const at = document.createElement("link");
+  at.rel = "apple-touch-icon"; at.href = "icon-192.png";
+  document.head.appendChild(at);
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => { navigator.serviceWorker.register("sw.js").catch(() => {}); });
+  }
 })();
 
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
