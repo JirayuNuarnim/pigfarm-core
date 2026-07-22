@@ -3,10 +3,11 @@
    - same-origin static (css/js/png/ico/json): stale-while-revalidate (instant, refreshes in bg)
    - CDN libraries: cache-first
    - Supabase API/auth/storage: never cached (always live) */
-const CACHE = "thecore-v3";
+const CACHE = "thecore-v4";
 const CORE = [
   "./", "./dashboard.html", "./index.html",
   "./shared/style.css", "./shared/supabase-client.js", "./shared/auth-guard.js", "./shared/lightbox.js",
+  "./shared/qrcode.min.js", "./shared/thai-baht-text.js",
   "./favicon.ico", "./icon-192.png", "./icon-512.png", "./manifest.json",
 ];
 
