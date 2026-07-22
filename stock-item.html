@@ -183,7 +183,8 @@ async function viewPhoto(path) {
     if (error) { statusEl.textContent = "บันทึกไม่สำเร็จ: " + error.message; return; }
 
     if (photoFile) {
-      const path = `stock/${farm}/${itemId}/${Date.now()}-${photoFile.name}`;
+      // path must be ASCII — Storage rejects Thai keys (farm names are Thai)
+      const path = `stock/${itemId}/${Date.now()}-${photoFile.name.replace(/[^a-zA-Z0-9._-]+/g, "_")}`;
       const { error: upErr } = await sb.storage.from("ops-attachments").upload(path, photoFile);
       if (!upErr) {
         await sb.from("ops_attachments").insert({

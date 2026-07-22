@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>รายงานสต็อกรายเดือน - THE CORE</title>
+<link rel="stylesheet" href="shared/style.css">
+<style>
+  tr.cat-head td {
+    background: linear-gradient(90deg, rgba(47,224,207,.12), transparent);
+    border-top: 2px solid rgba(47,224,207,.35); font-weight:700; color:var(--cyan);
+  }
+  .num-col { text-align:right; font-family:ui-monospace,Consolas,monospace; }
+  .z { color:var(--muted); }
+  @media print {
+    body { background:#fff; }
+    .no-print { display:none !important; }
+  }
+</style>
+</head>
+<body data-page="stock">
+<div class="layout">
+  <nav id="nav-root" class="sidebar no-print"></nav>
+  <main class="content">
+    <div class="page-header no-print">
+      <div>
+        <p style="margin:0;"><a class="link" href="stock.html">&larr; คลังสินค้า</a></p>
+        <h1>📊 รายงานรับ-จ่ายรายเดือน</h1>
+        <p class="subtitle">ยอดยกมา · รับเข้า · เบิก (แยกหมอ/ช่าง) · โอน · คงเหลือ — แทนไฟล์ Excel เดิมได้เลย</p>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <button class="btn secondary" id="csv-btn">⬇ Excel (CSV)</button>
+        <button class="btn secondary" onclick="window.print()">🖨️ พิมพ์</button>
+      </div>
+    </div>
+
+    <div class="card no-print" style="display:flex; gap:14px; align-items:end; flex-wrap:wrap;">
+      <div class="field" style="margin:0; min-width:170px;"><label>ฟาร์ม</label><select id="farm-sel"></select></div>
+      <div class="field" style="margin:0; min-width:150px;"><label>คลัง</label><select id="domain-sel"></select></div>
+      <div class="field" style="margin:0; min-width:150px;"><label>เดือน</label><input type="month" id="month-sel"></div>
+      <label style="margin:0 0 10px; display:flex; align-items:center; gap:6px; font-size:13px; color:var(--muted); cursor:pointer;">
+        <input type="checkbox" id="only-active" checked> เฉพาะที่มีการเคลื่อนไหว/มียอด
+      </label>
+    </div>
+
+    <h2 id="report-title" style="margin:4px 0 10px;"></h2>
+    <table>
+      <thead><tr>
+        <th style="width:100px;">รหัส</th><th>รายการ</th><th>หน่วย</th>
+        <th class="num-col">ยกมา</th><th class="num-col">รับเข้า</th>
+        <th class="num-col">เบิก(หมอ)</th><th class="num-col">เบิก(ช่าง)</th><th class="num-col">เบิกอื่น</th>
+        <th class="num-col">โอนออก</th><th class="num-col">โอนเข้า</th><th class="num-col">ปรับยอด</th>
+        <th class="num-col">คงเหลือ</th>
+      </tr></thead>
+      <tbody id="rows"><tr><td colspan="12" class="muted">เลือกเดือนแล้วรอสักครู่...</td></tr></tbody>
+    </table>
+  </main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="shared/supabase-client.js"></script>
+<script src="shared/auth-guard.js"></script>
+<script>
+let REPORT = [];   // computed rows for CSV
+const TH_MONTHS = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."];
+
+async function loadFarms() {
+  const sel = document.getElementById("farm-sel");
+  let farms = [];
+  if (canSeeAllFarms()) {
+    const { data } = await sb.from("farms").select("name").order("name");
+    farms = (data || []).map(f => f.name);
+  } else farms = myFarms();
+  sel.innerHTML = farms.map(f => `<option>${escapeHtml(f)}</option>`).join("");
+  document.getElementById("domain-sel").innerHTML =
+    Object.entries(DOMAIN_LABELS).map(([k, v]) => `<option value="${k}">${escapeHtml(v)}</option>`).join("");
+}
+
+async function fetchAll(query) {
+  let all = [], from = 0;
+  while (true) {
+    const { data, error } = await query.range(from, from + 999);
+    if (error) throw error;
+    all = all.concat(data || []);
+    if (!data || data.length < 1000) break;
+    from += 1000;
+  }
+  return all;
+}
+
+async function build() {
+  const farm = document.getElementById("farm-sel").value;
+  const domain = document.getElementById("domain-sel").value;
+  const ym = document.getElementById("month-sel").value;  // "2026-07"
+  if (!ym) return;
+  const [y, m] = ym.split("-").map(Number);
+  const start = `${ym}-01`;
+  const nextM = m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, "0")}-01`;
+  const beYear = (y + 543) % 100;
+  document.getElementById("report-title").textContent =
+    `สต็อก${DOMAIN_LABELS[domain] || domain} · ${farm} · ${TH_MONTHS[m - 1]}${String(beYear).padStart(2, "0")}`;
+  const tbody = document.getElementById("rows");
+  tbody.innerHTML = '<tr><td colspan="12" class="muted">กำลังคำนวณ...</td></tr>';
+
+  try {
+    // items ในคลังนี้
+    const items = await fetchAll(sb.from("ops_stock_overview")
+      .select("item_id, name, code, unit, category, category_group")
+      .eq("farm", farm).eq("domain", domain).order("code", { nullsFirst: false }));
+    const byId = {}; for (const it of items) byId[it.item_id] = it;
+
+    // txns ทั้งหมดถึงสิ้นเดือนที่เลือก (คำนวณยกมา + ในเดือน)
+    const txns = await fetchAll(sb.from("ops_stock_transactions")
+      .select("item_id, txn_date, txn_type, qty, note")
+      .eq("farm", farm).lt("txn_date", nextM).order("txn_date"));
+
+    const agg = {};  // item_id -> {open, recv, issDoc, issTech, issOther, tfOut, tfIn, adj}
+    for (const t of txns) {
+      if (!byId[t.item_id]) continue;  // คนละ domain
+      const a = agg[t.item_id] = agg[t.item_id] || { open: 0, recv: 0, issDoc: 0, issTech: 0, issOther: 0, tfOut: 0, tfIn: 0, adj: 0 };
+      const q = Number(t.qty);
+      if (t.txn_date < start) { a.open += q; continue; }
+      switch (t.txn_type) {
+        case "รับเข้า": a.recv += q; break;
+        case "เบิกจ่าย":
+          if ((t.note || "").includes("เบิกโดยหมอ")) a.issDoc += -q;
+          else if ((t.note || "").includes("เบิกโดยช่าง")) a.issTech += -q;
+          else a.issOther += -q;
+          break;
+        case "โอนออก": a.tfOut += -q; break;
+        case "โอนเข้า": a.tfIn += q; break;
+        case "ปรับปรุงยอด": a.adj += q; break;
+      }
+    }
+
+    const onlyActive = document.getElementById("only-active").checked;
+    REPORT = [];
+    for (const it of items) {
+      const a = agg[it.item_id];
+      if (!a) { if (!onlyActive) REPORT.push({ ...it, open: 0, recv: 0, issDoc: 0, issTech: 0, issOther: 0, tfOut: 0, tfIn: 0, adj: 0, close: 0 }); continue; }
+      const close = a.open + a.recv - a.issDoc - a.issTech - a.issOther - a.tfOut + a.tfIn + a.adj;
+      const moved = a.recv || a.issDoc || a.issTech || a.issOther || a.tfOut || a.tfIn || a.adj;
+      if (onlyActive && !moved && !a.open && !close) continue;
+      REPORT.push({ ...it, ...a, close });
+    }
+
+    // render grouped by category
+    if (!REPORT.length) { tbody.innerHTML = '<tr><td colspan="12" class="muted">ไม่มีข้อมูลในเดือนนี้</td></tr>'; return; }
+    const html = [];
+    let lastCat = null;
+    const fmt = (v) => v ? formatNumber(v, 0) : '<span class="z">-</span>';
+    for (const r of REPORT) {
+      const catKey = (r.category || "อื่นๆ") + " · " + (r.category_group || "");
+      if (catKey !== lastCat) {
+        lastCat = catKey;
+        html.push(`<tr class="cat-head"><td colspan="12">${escapeHtml(r.category || "อื่นๆ")} <span style="font-weight:normal; font-size:11px; color:var(--violet);">${escapeHtml(r.category_group || "")}</span></td></tr>`);
+      }
+      html.push(`<tr>
+        <td style="font-family:ui-monospace,Consolas,monospace; font-size:11px; color:var(--muted);">${escapeHtml(r.code || "—")}</td>
+        <td>${escapeHtml(r.name)}</td><td>${escapeHtml(r.unit || "")}</td>
+        <td class="num-col">${fmt(r.open)}</td><td class="num-col" style="color:var(--green);">${fmt(r.recv)}</td>
+        <td class="num-col">${fmt(r.issDoc)}</td><td class="num-col">${fmt(r.issTech)}</td><td class="num-col">${fmt(r.issOther)}</td>
+        <td class="num-col">${fmt(r.tfOut)}</td><td class="num-col">${fmt(r.tfIn)}</td><td class="num-col" style="color:var(--amber);">${fmt(r.adj)}</td>
+        <td class="num-col"><b>${formatNumber(r.close, 0)}</b></td>
+      </tr>`);
+    }
+    tbody.innerHTML = html.join("");
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="12" class="muted">คำนวณไม่สำเร็จ: ${escapeHtml(err.message || String(err))}</td></tr>`;
+  }
+}
+
+function exportCSV() {
+  if (!REPORT.length) { alert("ยังไม่มีข้อมูลรายงาน"); return; }
+  const title = document.getElementById("report-title").textContent;
+  const head = ["รหัส","หมวด","กลุ่ม","รายการ","หน่วย","ยอดยกมา","รับเข้า","เบิก(หมอ)","เบิก(ช่าง)","เบิกอื่น","โอนออก","โอนเข้า","ปรับยอด","คงเหลือ"];
+  const lines = [[title], head].concat(REPORT.map(r =>
+    [r.code || "", r.category || "", r.category_group || "", r.name, r.unit || "",
+     r.open, r.recv, r.issDoc, r.issTech, r.issOther, r.tfOut, r.tfIn, r.adj, r.close]));
+  const csv = "﻿" + lines.map(row => row.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\r\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = title.replace(/[\\/:*?"<>| ]+/g, "_") + ".csv";
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+(async () => {
+  const user = await requireAuth();
+  if (!user) return;
+  await loadFarms();
+  const p = new URLSearchParams(location.search);
+  if (p.get("farm")) document.getElementById("farm-sel").value = p.get("farm");
+  if (p.get("domain")) document.getElementById("domain-sel").value = p.get("domain");
+  const now = new Date();
+  document.getElementById("month-sel").value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  await build();
+  for (const id of ["farm-sel", "domain-sel", "month-sel", "only-active"])
+    document.getElementById(id).addEventListener("change", () => build());
+  document.getElementById("csv-btn").addEventListener("click", () => exportCSV());
+})();
+</script>
+</body>
+</html>

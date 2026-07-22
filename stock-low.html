@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ของใกล้หมด - THE CORE</title>
+<link rel="stylesheet" href="shared/style.css">
+<style>
+  .stat-strip { display:flex; gap:14px; flex-wrap:wrap; margin-bottom:16px; }
+  .stat-box { flex:1; min-width:150px; background:var(--panel); border:1px solid var(--stroke); border-radius:12px; padding:14px 18px; }
+  .stat-box .n { font-size:26px; font-weight:700; font-family:ui-monospace,Consolas,monospace; }
+  .stat-box .l { font-size:12px; color:var(--muted); }
+  .stat-box.red .n { color:var(--red); }
+  .stat-box.amber .n { color:var(--amber); }
+  .rp-in { width:64px; text-align:center; }
+  .qty-in { width:70px; text-align:center; }
+  tr.sel { background: rgba(47,224,207,.07); }
+</style>
+</head>
+<body data-page="stock">
+<div class="layout">
+  <nav id="nav-root" class="sidebar no-print"></nav>
+  <main class="content">
+    <div class="page-header">
+      <div>
+        <p style="margin:0;"><a class="link" href="stock.html">&larr; คลังสินค้า</a></p>
+        <h1>⚠️ ของหมด / ใกล้หมด</h1>
+        <p class="subtitle">ติ๊กเลือกของที่ต้องสั่ง แล้วสร้างใบขอซื้อเข้าระบบอนุมัติได้ทันที</p>
+      </div>
+    </div>
+
+    <div class="card" style="display:flex; gap:14px; align-items:end; flex-wrap:wrap;">
+      <div class="field" style="margin:0; min-width:170px;"><label>ฟาร์ม</label><select id="farm-sel"></select></div>
+      <div class="field" style="margin:0; min-width:150px;"><label>คลัง</label><select id="domain-sel"></select></div>
+      <div class="field" style="margin:0; min-width:170px;">
+        <label>แสดง</label>
+        <select id="mode-sel">
+          <option value="out">ของหมด (เคยมีการเคลื่อนไหว)</option>
+          <option value="low">ใกล้หมด (ต่ำกว่าจุดสั่งซื้อ)</option>
+          <option value="both" selected>ทั้งสองแบบ</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="stat-strip">
+      <div class="stat-box red"><div class="n" id="n-out">-</div><div class="l">ของหมด (เคยเคลื่อนไหว)</div></div>
+      <div class="stat-box amber"><div class="n" id="n-low">-</div><div class="l">ใกล้หมด (≤ จุดสั่งซื้อ)</div></div>
+      <div class="stat-box"><div class="n" id="n-sel">0</div><div class="l">เลือกไว้สั่งซื้อ</div></div>
+    </div>
+
+    <table>
+      <thead><tr>
+        <th style="width:34px;"><input type="checkbox" id="sel-all"></th>
+        <th style="width:110px;">รหัส</th><th>สินค้า</th><th>หมวด</th><th>คงเหลือ</th>
+        <th>จุดสั่งซื้อ</th><th>จำนวนที่จะสั่ง</th>
+      </tr></thead>
+      <tbody id="rows"><tr><td colspan="7" class="muted">กำลังโหลด...</td></tr></tbody>
+    </table>
+
+    <div class="card" style="position:sticky; bottom:12px; display:flex; gap:14px; align-items:center; flex-wrap:wrap;">
+      <b><span id="sel-count2">0</span> รายการที่เลือก</b>
+      <span class="muted" style="font-size:13px;">จะสร้างใบขอซื้อสถานะ "รอเสมียนกลาง" — ไปเติมราคา/ผู้ขายต่อในหน้าใบขอซื้อ</span>
+      <button class="btn" id="create-pr-btn" style="margin-left:auto;">📝 สร้างใบขอซื้อจากรายการที่เลือก</button>
+      <div id="status" class="muted"></div>
+    </div>
+  </main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="shared/supabase-client.js"></script>
+<script src="shared/auth-guard.js"></script>
+<script>
+let ROWS = [];       // enriched overview rows
+let MOVED = new Set(); // item_ids ที่เคยมีการเคลื่อนไหวในฟาร์มนี้
+
+async function loadFarms() {
+  const sel = document.getElementById("farm-sel");
+  let farms = [];
+  if (canSeeAllFarms()) {
+    const { data } = await sb.from("farms").select("name").order("name");
+    farms = (data || []).map(f => f.name);
+  } else farms = myFarms();
+  sel.innerHTML = farms.map(f => `<option>${escapeHtml(f)}</option>`).join("");
+  document.getElementById("domain-sel").innerHTML =
+    Object.entries(DOMAIN_LABELS).map(([k, v]) => `<option value="${k}">${escapeHtml(v)}</option>`).join("");
+}
+
+async function loadData() {
+  const farm = document.getElementById("farm-sel").value;
+  const domain = document.getElementById("domain-sel").value;
+  document.getElementById("rows").innerHTML = '<tr><td colspan="7" class="muted">กำลังโหลด...</td></tr>';
+  // 1) overview
+  let all = [], from = 0;
+  while (true) {
+    const { data, error } = await sb.from("ops_stock_overview").select("*")
+      .eq("farm", farm).eq("domain", domain).order("code", { nullsFirst: false }).range(from, from + 999);
+    if (error) { document.getElementById("rows").innerHTML = `<tr><td colspan="7" class="muted">${escapeHtml(error.message)}</td></tr>`; return; }
+    all = all.concat(data || []);
+    if (!data || data.length < 1000) break;
+    from += 1000;
+  }
+  // 2) item ids ที่เคยมีการเคลื่อนไหว (เพื่อกรอง "ของหมด" ให้เหลือเฉพาะของที่ฟาร์มนี้ใช้จริง)
+  MOVED = new Set();
+  from = 0;
+  while (true) {
+    const { data, error } = await sb.from("ops_stock_transactions").select("item_id").eq("farm", farm).range(from, from + 999);
+    if (error) break;
+    for (const t of (data || [])) MOVED.add(t.item_id);
+    if (!data || data.length < 1000) break;
+    from += 1000;
+  }
+  ROWS = all;
+  render();
+}
+
+function classify(r) {
+  const bal = Number(r.balance), rp = Number(r.reorder_point || 0);
+  if (bal <= 0 && MOVED.has(r.item_id)) return "out";
+  if (rp > 0 && bal > 0 && bal <= rp) return "low";
+  return null;
+}
+
+function render() {
+  const mode = document.getElementById("mode-sel").value;
+  const tbody = document.getElementById("rows");
+  const flagged = ROWS.map(r => ({ ...r, flag: classify(r) })).filter(r => r.flag);
+  document.getElementById("n-out").textContent = flagged.filter(r => r.flag === "out").length;
+  document.getElementById("n-low").textContent = flagged.filter(r => r.flag === "low").length;
+  const show = flagged.filter(r => mode === "both" || r.flag === mode);
+  if (!show.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="muted">ไม่มีรายการ 🎉 (ตั้ง "จุดสั่งซื้อ" ให้สินค้าเพื่อให้ระบบเตือนใกล้หมดได้)</td></tr>';
+    updateSel(); return;
+  }
+  tbody.innerHTML = show.map(r => `
+    <tr data-id="${r.item_id}">
+      <td><input type="checkbox" class="sel-chk" data-id="${r.item_id}"></td>
+      <td class="mono" style="font-size:12px; color:var(--muted); font-family:ui-monospace,Consolas,monospace;">${escapeHtml(r.code || "—")}</td>
+      <td>${escapeHtml(r.name)} ${r.flag === "out" ? '<span class="badge danger">หมด</span>' : '<span class="badge warn">ใกล้หมด</span>'}</td>
+      <td style="font-size:12px; color:var(--muted);">${escapeHtml(r.category || "")}</td>
+      <td class="text-right">${formatNumber(r.balance, 0)} ${escapeHtml(r.unit || "")}</td>
+      <td><input type="number" class="rp-in" data-id="${r.item_id}" value="${Number(r.reorder_point || 0)}" title="จุดสั่งซื้อ — แก้แล้วบันทึกอัตโนมัติ"></td>
+      <td><input type="number" class="qty-in" data-id="${r.item_id}" value="${suggestQty(r)}" min="0" step="0.01"></td>
+    </tr>`).join("");
+  tbody.querySelectorAll(".sel-chk").forEach(c => c.addEventListener("change", () => {
+    c.closest("tr").classList.toggle("sel", c.checked); updateSel();
+  }));
+  tbody.querySelectorAll(".rp-in").forEach(inp => inp.addEventListener("change", async () => {
+    const itemId = Number(inp.dataset.id);
+    const farm = document.getElementById("farm-sel").value;
+    const v = parseFloat(inp.value) || 0;
+    const { error } = await sb.from("ops_farm_item_price").upsert(
+      { farm, item_id: itemId, reorder_point: v }, { onConflict: "farm,item_id" });
+    document.getElementById("status").textContent = error ? "บันทึกจุดสั่งซื้อไม่สำเร็จ: " + error.message : `บันทึกจุดสั่งซื้อ = ${v} แล้ว`;
+    const row = ROWS.find(x => x.item_id === itemId); if (row) row.reorder_point = v;
+  }));
+  updateSel();
+}
+
+function suggestQty(r) {
+  const rp = Number(r.reorder_point || 0), bal = Number(r.balance);
+  if (rp > 0) return Math.max(rp * 2 - bal, 1);  // เติมให้ถึง 2 เท่าของจุดสั่งซื้อ
+  return 1;
+}
+
+function updateSel() {
+  const n = document.querySelectorAll(".sel-chk:checked").length;
+  document.getElementById("n-sel").textContent = n;
+  document.getElementById("sel-count2").textContent = n;
+}
+
+async function createPR() {
+  const statusEl = document.getElementById("status");
+  const checked = [...document.querySelectorAll(".sel-chk:checked")];
+  if (!checked.length) { statusEl.textContent = "ยังไม่ได้เลือกรายการ"; return; }
+  const farm = document.getElementById("farm-sel").value;
+  const domain = document.getElementById("domain-sel").value;
+  const btn = document.getElementById("create-pr-btn");
+  btn.disabled = true;
+  statusEl.textContent = "กำลังสร้างใบขอซื้อ...";
+  try {
+    const { data: docNo, error: docErr } = await sb.rpc("ops_next_doc_no", { p_doc_type: "purchase", p_farm: farm });
+    if (docErr) throw docErr;
+    const { data: { user } } = await sb.auth.getUser();
+    const { data: me } = await sb.from("ops_users").select("name").eq("user_id", user.id).single();
+    const { data: req, error } = await sb.from("ops_purchase_requests").insert({
+      doc_no: docNo, farm, domain, requested_by: (me && me.name) || "ระบบ",
+      status: "รอเสมียนกลาง", note: "สร้างจากหน้าของใกล้หมด",
+    }).select("id").single();
+    if (error) throw error;
+    const items = checked.map(chk => {
+      const id = Number(chk.dataset.id);
+      const r = ROWS.find(x => x.item_id === id);
+      const qty = parseFloat(document.querySelector(`.qty-in[data-id="${id}"]`)?.value) || 1;
+      return { request_id: req.id, item_id: id, description: r.name, qty, unit: r.unit || "", unit_price: Number(r.unit_price) || 0 };
+    });
+    const { error: itemErr } = await sb.from("ops_purchase_request_items").insert(items);
+    if (itemErr) throw itemErr;
+    statusEl.innerHTML = `<span style="color:var(--green);">✓ สร้าง ${escapeHtml(docNo)} แล้ว — กำลังเปิด...</span>`;
+    setTimeout(() => { window.location.href = "purchase-request.html?id=" + req.id; }, 600);
+  } catch (err) {
+    statusEl.textContent = "สร้างไม่สำเร็จ: " + (err.message || err);
+    btn.disabled = false;
+  }
+}
+
+(async () => {
+  const user = await requireAuth();
+  if (!user) return;
+  await loadFarms();
+  const p = new URLSearchParams(location.search);
+  if (p.get("farm")) document.getElementById("farm-sel").value = p.get("farm");
+  if (p.get("domain")) document.getElementById("domain-sel").value = p.get("domain");
+  await loadData();
+  document.getElementById("farm-sel").addEventListener("change", () => loadData());
+  document.getElementById("domain-sel").addEventListener("change", () => loadData());
+  document.getElementById("mode-sel").addEventListener("change", () => render());
+  document.getElementById("sel-all").addEventListener("change", (e) => {
+    document.querySelectorAll(".sel-chk").forEach(c => { c.checked = e.target.checked; c.closest("tr").classList.toggle("sel", c.checked); });
+    updateSel();
+  });
+  document.getElementById("create-pr-btn").addEventListener("click", () => createPR());
+})();
+</script>
+</body>
+</html>

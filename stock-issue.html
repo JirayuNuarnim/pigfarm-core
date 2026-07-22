@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>เบิกของ - THE CORE</title>
+<link rel="stylesheet" href="shared/style.css">
+<style>
+  .issue-grid { display:grid; grid-template-columns: 1fr 420px; gap:16px; align-items:start; }
+  @media (max-width: 980px) { .issue-grid { grid-template-columns: 1fr; } }
+  .cat-list { max-height: 62vh; overflow-y:auto; }
+  .cat-item { display:flex; justify-content:space-between; align-items:center; gap:10px; padding:8px 10px; border-bottom:1px solid var(--stroke); cursor:pointer; border-radius:8px; }
+  .cat-item:hover { background: rgba(47,224,207,.08); }
+  .cat-item .nm { flex:1; }
+  .cat-item .code { font-family:ui-monospace,Consolas,monospace; font-size:11px; color:var(--muted); }
+  .cat-item .bal { font-size:13px; color:var(--cyan); white-space:nowrap; }
+  .cat-item .bal.zero { color:var(--muted); }
+  .cart-row { display:flex; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid var(--stroke); }
+  .cart-row .nm { flex:1; font-size:14px; }
+  .cart-row .stepper { display:flex; align-items:center; gap:4px; }
+  .cart-row .stepper button { width:26px; height:26px; border-radius:6px; border:1px solid var(--stroke); background:var(--panel-2); color:var(--text); cursor:pointer; }
+  .cart-row .stepper input { width:56px; text-align:center; }
+  .cart-row .rm { color:var(--red); cursor:pointer; background:none; border:none; font-size:16px; }
+  .who-chip { display:inline-flex; align-items:center; gap:6px; padding:7px 16px; border-radius:999px; border:1px solid var(--stroke); background:var(--panel-2); cursor:pointer; font-size:14px; }
+  .who-chip.on { border-color:var(--cyan); background:rgba(47,224,207,.15); color:var(--cyan); }
+</style>
+</head>
+<body data-page="stock">
+<div class="layout">
+  <nav id="nav-root" class="sidebar no-print"></nav>
+  <main class="content">
+    <div class="page-header">
+      <div>
+        <p style="margin:0;"><a class="link" href="stock.html">&larr; คลังสินค้า</a></p>
+        <h1>🛒 เบิกของ (หลายรายการ)</h1>
+        <p class="subtitle">เลือกของหลายรายการ เบิกครั้งเดียว แนบรูปเดียวจบ</p>
+      </div>
+    </div>
+
+    <div class="card" style="display:flex; gap:14px; align-items:end; flex-wrap:wrap;">
+      <div class="field" style="margin:0; min-width:170px;">
+        <label>ฟาร์ม</label><select id="farm-sel"></select>
+      </div>
+      <div class="field" style="margin:0; min-width:150px;">
+        <label>คลัง</label><select id="domain-sel"></select>
+      </div>
+      <div class="field" style="margin:0; flex:1; min-width:200px;">
+        <label>ค้นหาสินค้า / รหัส</label>
+        <input type="text" id="q" placeholder="พิมพ์ชื่อ หรือรหัส แล้วกดรายการเพื่อหยิบใส่ตะกร้า">
+      </div>
+    </div>
+
+    <div class="issue-grid">
+      <div class="card">
+        <h2 style="margin-top:0;">รายการในคลัง <span class="muted" id="cat-count" style="font-size:13px; font-weight:normal;"></span></h2>
+        <div class="cat-list" id="cat-list"><p class="muted">กำลังโหลด...</p></div>
+      </div>
+
+      <div class="card">
+        <h2 style="margin-top:0;">ตะกร้าเบิก <span id="cart-count" class="badge">0</span></h2>
+        <div id="cart-rows"><p class="muted" style="font-size:13px;">ยังไม่มีรายการ — กดจากรายการด้านซ้าย</p></div>
+
+        <div class="field" style="margin-top:14px;">
+          <label>ผู้เบิก</label>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <span class="who-chip on" data-who="หมอ">🩺 หมอ</span>
+            <span class="who-chip" data-who="ช่าง">🔧 ช่าง</span>
+            <span class="who-chip" data-who="อื่นๆ">👤 อื่นๆ</span>
+          </div>
+        </div>
+        <div class="field"><label>ชื่อผู้เบิก (ถ้ามี)</label><input type="text" id="who-name" placeholder="เช่น ช่างสมชาย"></div>
+        <div class="field"><label>หมายเหตุ</label><input type="text" id="note" placeholder="เอาไปใช้ที่ไหน / งานอะไร"></div>
+        <div class="field">
+          <label>รูปถ่ายยืนยันการเบิก (บังคับ)</label>
+          <input type="file" id="photo" accept="image/*" capture="environment">
+        </div>
+        <button class="btn" id="save-btn" style="width:100%; margin-top:6px;">✓ บันทึกการเบิก</button>
+        <div id="status" class="muted" style="margin-top:10px; font-size:13px;"></div>
+      </div>
+    </div>
+  </main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="shared/supabase-client.js"></script>
+<script src="shared/auth-guard.js"></script>
+<script>
+let CATALOG = [];
+let CART = [];   // {item_id, name, code, unit, balance, qty}
+let WHO = "หมอ";
+
+async function loadFarms() {
+  const sel = document.getElementById("farm-sel");
+  let farms = [];
+  if (canSeeAllFarms()) {
+    const { data } = await sb.from("farms").select("name").order("name");
+    farms = (data || []).map(f => f.name);
+  } else farms = myFarms();
+  sel.innerHTML = farms.map(f => `<option>${escapeHtml(f)}</option>`).join("");
+  const dsel = document.getElementById("domain-sel");
+  dsel.innerHTML = Object.entries(DOMAIN_LABELS).map(([k, v]) => `<option value="${k}">${escapeHtml(v)}</option>`).join("");
+}
+
+async function loadCatalog() {
+  const farm = document.getElementById("farm-sel").value;
+  const domain = document.getElementById("domain-sel").value;
+  document.getElementById("cat-list").innerHTML = '<p class="muted">กำลังโหลด...</p>';
+  CATALOG = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await sb.from("ops_stock_overview")
+      .select("item_id, name, code, unit, balance, category")
+      .eq("farm", farm).eq("domain", domain)
+      .order("code", { nullsFirst: false }).order("name").range(from, from + 999);
+    if (error) { document.getElementById("cat-list").innerHTML = `<p class="muted">โหลดไม่สำเร็จ: ${escapeHtml(error.message)}</p>`; return; }
+    CATALOG = CATALOG.concat(data || []);
+    if (!data || data.length < 1000) break;
+    from += 1000;
+  }
+  renderCatalog();
+}
+
+function renderCatalog() {
+  const q = document.getElementById("q").value.trim().toLowerCase();
+  let rows = CATALOG;
+  if (q) rows = rows.filter(r => (r.name || "").toLowerCase().includes(q) || (r.code || "").toLowerCase().includes(q));
+  // ของที่มี stock ขึ้นก่อน
+  rows = rows.slice().sort((a, b) => (Number(b.balance) > 0) - (Number(a.balance) > 0));
+  document.getElementById("cat-count").textContent = `(${rows.length})`;
+  document.getElementById("cat-list").innerHTML = rows.slice(0, 250).map(r => `
+    <div class="cat-item" data-id="${r.item_id}">
+      <span class="nm">${escapeHtml(r.name)} <span class="code">${escapeHtml(r.code || "")}</span></span>
+      <span class="bal ${Number(r.balance) > 0 ? "" : "zero"}">${formatNumber(r.balance, 0)} ${escapeHtml(r.unit || "")}</span>
+    </div>`).join("") || '<p class="muted">ไม่พบสินค้า</p>';
+  document.querySelectorAll(".cat-item").forEach(el => el.addEventListener("click", () => addToCart(Number(el.dataset.id))));
+}
+
+function addToCart(itemId) {
+  const it = CATALOG.find(r => r.item_id === itemId);
+  if (!it) return;
+  const ex = CART.find(c => c.item_id === itemId);
+  if (ex) ex.qty += 1;
+  else CART.push({ item_id: it.item_id, name: it.name, code: it.code, unit: it.unit, balance: Number(it.balance), qty: 1 });
+  renderCart();
+}
+
+function renderCart() {
+  document.getElementById("cart-count").textContent = CART.length;
+  const box = document.getElementById("cart-rows");
+  if (!CART.length) { box.innerHTML = '<p class="muted" style="font-size:13px;">ยังไม่มีรายการ — กดจากรายการด้านซ้าย</p>'; return; }
+  box.innerHTML = CART.map((c, i) => `
+    <div class="cart-row">
+      <span class="nm">${escapeHtml(c.name)}<br><span class="muted" style="font-size:11px;">มีอยู่ ${formatNumber(c.balance, 0)} ${escapeHtml(c.unit || "")}${c.qty > c.balance ? ' · <span style="color:var(--amber);">เกินที่มี!</span>' : ""}</span></span>
+      <span class="stepper">
+        <button data-i="${i}" data-d="-1">−</button>
+        <input type="number" step="0.01" min="0" value="${c.qty}" data-i="${i}" class="qty-in">
+        <button data-i="${i}" data-d="1">+</button>
+      </span>
+      <button class="rm" data-i="${i}" title="เอาออก">✕</button>
+    </div>`).join("");
+  box.querySelectorAll(".stepper button").forEach(b => b.addEventListener("click", () => {
+    const c = CART[Number(b.dataset.i)];
+    c.qty = Math.max(0.01, c.qty + Number(b.dataset.d));
+    renderCart();
+  }));
+  box.querySelectorAll(".qty-in").forEach(inp => inp.addEventListener("change", () => {
+    CART[Number(inp.dataset.i)].qty = Math.max(0.01, parseFloat(inp.value) || 1);
+    renderCart();
+  }));
+  box.querySelectorAll(".rm").forEach(b => b.addEventListener("click", () => {
+    CART.splice(Number(b.dataset.i), 1);
+    renderCart();
+  }));
+}
+
+document.addEventListener("click", (e) => {
+  if (e.target.classList && e.target.classList.contains("who-chip")) {
+    document.querySelectorAll(".who-chip").forEach(c => c.classList.remove("on"));
+    e.target.classList.add("on");
+    WHO = e.target.dataset.who;
+  }
+});
+
+async function save() {
+  const statusEl = document.getElementById("status");
+  const farm = document.getElementById("farm-sel").value;
+  if (!CART.length) { statusEl.textContent = "ยังไม่มีรายการในตะกร้า"; return; }
+  const over = CART.filter(c => c.qty > c.balance);
+  if (over.length && !confirm(`มี ${over.length} รายการที่เบิกเกินยอดคงเหลือ ยืนยันบันทึก?`)) return;
+  const photoFile = document.getElementById("photo").files[0];
+  if (!photoFile) { statusEl.textContent = "กรุณาแนบรูปถ่ายยืนยันการเบิก"; return; }
+
+  const btn = document.getElementById("save-btn");
+  btn.disabled = true;
+  statusEl.textContent = "กำลังบันทึก...";
+  try {
+    const { data: docNo, error: docErr } = await sb.rpc("ops_next_doc_no", { p_doc_type: "issue", p_farm: farm });
+    if (docErr) throw docErr;
+    const whoName = document.getElementById("who-name").value.trim();
+    const note = document.getElementById("note").value.trim();
+    const noteText = `เบิกโดย${WHO}${whoName ? " " + whoName : ""}${note ? " — " + note : ""}`;
+    const userId = (await sb.auth.getUser()).data.user.id;
+    const today = todayISO();
+
+    const rows = CART.map(c => ({
+      item_id: c.item_id, farm, txn_date: today, txn_type: "เบิกจ่าย",
+      qty: -Math.abs(c.qty), ref_no: docNo, note: noteText, created_by: userId,
+    }));
+    const { data: inserted, error } = await sb.from("ops_stock_transactions").insert(rows).select("id");
+    if (error) throw error;
+
+    // one photo shared across all txns in this batch (path must be ASCII — Storage rejects Thai keys)
+    const safeName = photoFile.name.replace(/[^a-zA-Z0-9._-]+/g, "_");
+    const path = `stock-issue/${docNo}-${Date.now()}-${safeName}`;
+    const { error: upErr } = await sb.storage.from("ops-attachments").upload(path, photoFile);
+    if (!upErr) {
+      await sb.from("ops_attachments").insert((inserted || []).map(t => ({
+        entity_type: "stock_transaction", entity_id: t.id, storage_path: path, uploaded_by: userId, note: `ใบเบิก ${docNo}`,
+      })));
+    }
+    statusEl.innerHTML = `<span style="color:var(--green);">✓ บันทึกใบเบิก <b>${escapeHtml(docNo)}</b> แล้ว ${CART.length} รายการ</span>`;
+    CART = [];
+    renderCart();
+    document.getElementById("photo").value = "";
+    document.getElementById("note").value = "";
+    loadCatalog();  // refresh balances
+  } catch (err) {
+    statusEl.textContent = "บันทึกไม่สำเร็จ: " + (err.message || err);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+(async () => {
+  const user = await requireAuth();
+  if (!user) return;
+  await loadFarms();
+  const p = new URLSearchParams(location.search);
+  if (p.get("farm")) document.getElementById("farm-sel").value = p.get("farm");
+  if (p.get("domain")) document.getElementById("domain-sel").value = p.get("domain");
+  await loadCatalog();
+  document.getElementById("q").addEventListener("input", () => renderCatalog());
+  document.getElementById("farm-sel").addEventListener("change", () => loadCatalog());
+  document.getElementById("domain-sel").addEventListener("change", () => loadCatalog());
+  document.getElementById("save-btn").addEventListener("click", () => save());
+})();
+</script>
+</body>
+</html>

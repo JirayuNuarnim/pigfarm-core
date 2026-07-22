@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ตรวจนับสต็อก - THE CORE</title>
+<link rel="stylesheet" href="shared/style.css">
+<style>
+  tr.cat-head td {
+    background: linear-gradient(90deg, rgba(255,180,87,.12), transparent);
+    border-top: 2px solid rgba(255,180,87,.4); font-weight:700; color:var(--amber);
+  }
+  .count-in { width:84px; text-align:center; }
+  tr.diff-plus td { background: rgba(56,224,138,.06); }
+  tr.diff-minus td { background: rgba(255,98,116,.06); }
+  .diff-tag { font-size:12px; font-family:ui-monospace,Consolas,monospace; }
+  .diff-tag.plus { color:var(--green); }
+  .diff-tag.minus { color:var(--red); }
+</style>
+</head>
+<body data-page="stock">
+<div class="layout">
+  <nav id="nav-root" class="sidebar no-print"></nav>
+  <main class="content">
+    <div class="page-header">
+      <div>
+        <p style="margin:0;"><a class="link" href="stock.html">&larr; คลังสินค้า</a></p>
+        <h1>📋 ตรวจนับสต็อก</h1>
+        <p class="subtitle">นับของจริงทีละหมวด ใส่เฉพาะตัวที่ไม่ตรง — ระบบปรับยอดพร้อมบันทึกหลักฐานส่วนต่าง</p>
+      </div>
+    </div>
+
+    <div class="card" style="display:flex; gap:14px; align-items:end; flex-wrap:wrap;">
+      <div class="field" style="margin:0; min-width:170px;"><label>ฟาร์ม</label><select id="farm-sel"></select></div>
+      <div class="field" style="margin:0; min-width:150px;"><label>คลัง</label><select id="domain-sel"></select></div>
+      <div class="field" style="margin:0; min-width:170px;"><label>หมวดหมู่ (นับทีละหมวด)</label><select id="cat-sel"></select></div>
+      <div class="field" style="margin:0; flex:1; min-width:180px;"><label>ค้นหา</label><input type="text" id="q" placeholder="ชื่อ / รหัส"></div>
+      <label style="margin:0 0 10px; display:flex; align-items:center; gap:6px; font-size:13px; color:var(--muted); cursor:pointer;">
+        <input type="checkbox" id="only-stock" checked> เฉพาะที่มียอดในระบบ
+      </label>
+    </div>
+
+    <table>
+      <thead><tr>
+        <th style="width:100px;">รหัส</th><th>สินค้า</th><th>หน่วย</th>
+        <th class="text-right">ยอดในระบบ</th><th style="width:110px;">นับได้จริง</th><th>ส่วนต่าง</th>
+      </tr></thead>
+      <tbody id="rows"><tr><td colspan="6" class="muted">กำลังโหลด...</td></tr></tbody>
+    </table>
+
+    <div class="card" style="position:sticky; bottom:12px; display:flex; gap:14px; align-items:center; flex-wrap:wrap;">
+      <b><span id="diff-count">0</span> รายการมีส่วนต่าง</b>
+      <span class="muted" style="font-size:13px;" id="diff-summary"></span>
+      <button class="btn" id="save-btn" style="margin-left:auto;">✓ บันทึกปรับยอดตามที่นับ</button>
+      <div id="status" class="muted"></div>
+    </div>
+  </main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="shared/supabase-client.js"></script>
+<script src="shared/auth-guard.js"></script>
+<script>
+let ALL = [];
+let COUNTS = {};   // item_id -> counted qty (only when user typed)
+
+async function loadFarms() {
+  const sel = document.getElementById("farm-sel");
+  let farms = [];
+  if (canSeeAllFarms()) {
+    const { data } = await sb.from("farms").select("name").order("name");
+    farms = (data || []).map(f => f.name);
+  } else farms = myFarms();
+  sel.innerHTML = farms.map(f => `<option>${escapeHtml(f)}</option>`).join("");
+  document.getElementById("domain-sel").innerHTML =
+    Object.entries(DOMAIN_LABELS).map(([k, v]) => `<option value="${k}">${escapeHtml(v)}</option>`).join("");
+}
+
+async function loadData() {
+  const farm = document.getElementById("farm-sel").value;
+  const domain = document.getElementById("domain-sel").value;
+  document.getElementById("rows").innerHTML = '<tr><td colspan="6" class="muted">กำลังโหลด...</td></tr>';
+  ALL = []; COUNTS = {};
+  let from = 0;
+  while (true) {
+    const { data, error } = await sb.from("ops_stock_overview").select("item_id, name, code, unit, balance, category")
+      .eq("farm", farm).eq("domain", domain).order("code", { nullsFirst: false }).order("name").range(from, from + 999);
+    if (error) { document.getElementById("rows").innerHTML = `<tr><td colspan="6" class="muted">${escapeHtml(error.message)}</td></tr>`; return; }
+    ALL = ALL.concat(data || []);
+    if (!data || data.length < 1000) break;
+    from += 1000;
+  }
+  const cats = [...new Set(ALL.map(r => r.category).filter(Boolean))].sort((a, b) => a.localeCompare(b, "th"));
+  document.getElementById("cat-sel").innerHTML = '<option value="">— ทุกหมวด —</option>' +
+    cats.map(c => `<option>${escapeHtml(c)}</option>`).join("");
+  render();
+}
+
+function render() {
+  const q = document.getElementById("q").value.trim().toLowerCase();
+  const cat = document.getElementById("cat-sel").value;
+  const onlyStock = document.getElementById("only-stock").checked;
+  let rows = ALL;
+  if (cat) rows = rows.filter(r => r.category === cat);
+  if (onlyStock) rows = rows.filter(r => Number(r.balance) !== 0 || COUNTS[r.item_id] !== undefined);
+  if (q) rows = rows.filter(r => (r.name || "").toLowerCase().includes(q) || (r.code || "").toLowerCase().includes(q));
+
+  const tbody = document.getElementById("rows");
+  if (!rows.length) { tbody.innerHTML = '<tr><td colspan="6" class="muted">ไม่พบรายการ</td></tr>'; updateSummary(); return; }
+  const html = [];
+  let lastCat = null;
+  for (const r of rows) {
+    const c = r.category || "อื่นๆ";
+    if (c !== lastCat) { lastCat = c; html.push(`<tr class="cat-head"><td colspan="6">${escapeHtml(c)}</td></tr>`); }
+    const counted = COUNTS[r.item_id];
+    const diff = counted === undefined ? 0 : counted - Number(r.balance);
+    html.push(`<tr data-id="${r.item_id}" class="${diff > 0 ? "diff-plus" : diff < 0 ? "diff-minus" : ""}">
+      <td style="font-family:ui-monospace,Consolas,monospace; font-size:11px; color:var(--muted);">${escapeHtml(r.code || "—")}</td>
+      <td>${escapeHtml(r.name)}</td><td>${escapeHtml(r.unit || "")}</td>
+      <td class="text-right">${formatNumber(r.balance, 0)}</td>
+      <td><input type="number" step="0.01" class="count-in" data-id="${r.item_id}" placeholder="—" value="${counted !== undefined ? counted : ""}"></td>
+      <td>${counted === undefined ? '<span class="muted" style="font-size:12px;">ยังไม่นับ</span>'
+          : diff === 0 ? '<span class="diff-tag" style="color:var(--green);">✓ ตรง</span>'
+          : `<span class="diff-tag ${diff > 0 ? "plus" : "minus"}">${diff > 0 ? "+" : ""}${formatNumber(diff, 0)}</span>`}</td>
+    </tr>`);
+  }
+  tbody.innerHTML = html.join("");
+  tbody.querySelectorAll(".count-in").forEach(inp => inp.addEventListener("change", () => {
+    const id = Number(inp.dataset.id);
+    if (inp.value === "") delete COUNTS[id];
+    else COUNTS[id] = parseFloat(inp.value) || 0;
+    render();
+  }));
+  updateSummary();
+}
+
+function updateSummary() {
+  const diffs = Object.entries(COUNTS).map(([id, v]) => {
+    const r = ALL.find(x => x.item_id === Number(id));
+    return r ? { r, diff: v - Number(r.balance) } : null;
+  }).filter(x => x && Math.abs(x.diff) > 1e-9);
+  document.getElementById("diff-count").textContent = diffs.length;
+  const plus = diffs.filter(d => d.diff > 0).length, minus = diffs.filter(d => d.diff < 0).length;
+  document.getElementById("diff-summary").textContent = diffs.length ? `เกิน ${plus} · ขาด ${minus} — กดบันทึกเพื่อปรับยอดให้ตรงของจริง` : "ใส่ตัวเลขเฉพาะช่องที่นับแล้ว";
+}
+
+async function save() {
+  const statusEl = document.getElementById("status");
+  const farm = document.getElementById("farm-sel").value;
+  const diffs = Object.entries(COUNTS).map(([id, v]) => {
+    const r = ALL.find(x => x.item_id === Number(id));
+    return r ? { r, counted: v, diff: v - Number(r.balance) } : null;
+  }).filter(x => x && Math.abs(x.diff) > 1e-9);
+  if (!diffs.length) { statusEl.textContent = "ไม่มีส่วนต่างให้ปรับ (นับตรงหมด หรือยังไม่ได้ใส่ตัวเลข)"; return; }
+  if (!confirm(`ปรับยอด ${diffs.length} รายการให้ตรงกับที่นับได้จริง?`)) return;
+  const btn = document.getElementById("save-btn");
+  btn.disabled = true;
+  statusEl.textContent = "กำลังบันทึก...";
+  try {
+    const { data: docNo, error: docErr } = await sb.rpc("ops_next_doc_no", { p_doc_type: "count", p_farm: farm });
+    if (docErr) throw docErr;
+    const userId = (await sb.auth.getUser()).data.user.id;
+    const today = todayISO();
+    const rows = diffs.map(d => ({
+      item_id: d.r.item_id, farm, txn_date: today, txn_type: "ปรับปรุงยอด",
+      qty: d.diff, ref_no: docNo,
+      note: `ตรวจนับ: ระบบ ${d.r.balance} นับได้ ${d.counted}`, created_by: userId,
+    }));
+    const { error } = await sb.from("ops_stock_transactions").insert(rows);
+    if (error) throw error;
+    statusEl.innerHTML = `<span style="color:var(--green);">✓ ปรับยอดใบตรวจนับ <b>${escapeHtml(docNo)}</b> แล้ว ${diffs.length} รายการ</span>`;
+    COUNTS = {};
+    await loadData();
+  } catch (err) {
+    statusEl.textContent = "บันทึกไม่สำเร็จ: " + (err.message || err);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+(async () => {
+  const user = await requireAuth();
+  if (!user) return;
+  await loadFarms();
+  const p = new URLSearchParams(location.search);
+  if (p.get("farm")) document.getElementById("farm-sel").value = p.get("farm");
+  if (p.get("domain")) document.getElementById("domain-sel").value = p.get("domain");
+  await loadData();
+  document.getElementById("q").addEventListener("input", () => render());
+  document.getElementById("cat-sel").addEventListener("change", () => render());
+  document.getElementById("only-stock").addEventListener("change", () => render());
+  document.getElementById("farm-sel").addEventListener("change", () => loadData());
+  document.getElementById("domain-sel").addEventListener("change", () => loadData());
+  document.getElementById("save-btn").addEventListener("click", () => save());
+})();
+</script>
+</body>
+</html>

@@ -30,7 +30,14 @@
         <h1 id="domain-title">คลังสินค้า</h1>
         <p class="subtitle" id="scope-line"></p>
       </div>
-      <button class="btn" id="new-item-btn" style="display:none;">+ เพิ่มสินค้าใหม่</button>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <a class="btn secondary" id="lnk-issue" href="#">🛒 เบิกของ</a>
+        <a class="btn secondary" id="lnk-low" href="#">⚠️ ใกล้หมด</a>
+        <a class="btn secondary" id="lnk-report" href="#">📊 รายงาน</a>
+        <a class="btn secondary" id="lnk-transfer" href="#">🔄 โอน</a>
+        <a class="btn secondary" id="lnk-count" href="#">📋 ตรวจนับ</a>
+        <button class="btn" id="new-item-btn" style="display:none;">+ เพิ่มสินค้าใหม่</button>
+      </div>
     </div>
 
     <div class="card" style="display:flex; gap:14px; align-items:end; flex-wrap:wrap;">
@@ -198,11 +205,22 @@ function renderItems() {
   await loadFarmOptions();
   await loadFarmData();
 
+  const syncToolLinks = () => {
+    const farm = encodeURIComponent(document.getElementById("farm-filter").value || "");
+    const qs = `?farm=${farm}&domain=${encodeURIComponent(domain)}`;
+    document.getElementById("lnk-issue").href = "stock-issue.html" + qs;
+    document.getElementById("lnk-low").href = "stock-low.html" + qs;
+    document.getElementById("lnk-report").href = "stock-report.html" + qs;
+    document.getElementById("lnk-transfer").href = "stock-transfer.html" + qs;
+    document.getElementById("lnk-count").href = "stock-count.html" + qs;
+  };
+  syncToolLinks();
+
   document.getElementById("q").addEventListener("input", () => renderItems());
   document.getElementById("group-filter").addEventListener("change", () => { buildCategoryFilters(); renderItems(); });
   document.getElementById("cat-filter").addEventListener("change", () => renderItems());
   document.getElementById("only-stock").addEventListener("change", () => renderItems());
-  document.getElementById("farm-filter").addEventListener("change", () => loadFarmData());
+  document.getElementById("farm-filter").addEventListener("change", () => { syncToolLinks(); loadFarmData(); });
 
   if (isOwner() || isCentral()) {
     document.getElementById("new-item-btn").style.display = "";
