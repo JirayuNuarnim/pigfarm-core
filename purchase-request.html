@@ -275,6 +275,7 @@ async function renderDetail() {
       <p class="subtitle">ฟาร์ม ${escapeHtml(req.farm)} · ${escapeHtml(DOMAIN_LABELS[req.domain] || req.domain)} · ผู้ขอ ${escapeHtml(req.requested_by || "")}</p></div>
       <div style="display:flex; gap:8px;">
         <a class="btn secondary" href="purchase-request.html">← กลับรายการ</a>
+        <a class="btn secondary" href="purchase-order-new.html?from=${req.id}">🔁 สั่งซ้ำ</a>
         <a class="btn secondary" href="purchase-request-print.html?id=${req.id}" target="_blank">🖨️ พิมพ์</a>
       </div>
     </div>

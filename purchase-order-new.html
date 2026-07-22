@@ -559,6 +559,32 @@ function renderAttachedDocs() {
     if (createdDocs.length === 1) window.location.href = `purchase-request.html?id=${createdDocs[0].id}`;
     else { statusEl.innerHTML = "สร้าง " + createdDocs.length + " ใบ: " + createdDocs.map(d => `<a class="link" href="purchase-request.html?id=${d.id}">${d.doc_no}</a>`).join(", "); BILL = []; renderBill(); }
   });
+
+  // สั่งซ้ำ: prefill from an existing purchase request (?from=ID)
+  const fromId = new URLSearchParams(location.search).get("from");
+  if (fromId) {
+    const { data: srcReq } = await sb.from("ops_purchase_requests").select("*").eq("id", fromId).single();
+    if (srcReq) {
+      if ([...farmSel.options].some(o => o.value === srcReq.farm)) farmSel.value = srcReq.farm;
+      if (srcReq.company_id) companySel.value = String(srcReq.company_id);
+      if (srcReq.supplier_id) { const s = SUPPLIERS.find(x => x.id === srcReq.supplier_id); if (s) await selectSupplier(s.id); }
+      const { data: srcItems } = await sb.from("ops_purchase_request_items")
+        .select("qty, unit, unit_price, description, item_id, ops_items(name, size, unit, domain)")
+        .eq("request_id", fromId);
+      BILL = (srcItems || []).map(it => ({
+        item_id: it.item_id,
+        name: it.ops_items?.name || it.description,
+        size: it.ops_items?.size || "",
+        unit: it.unit || it.ops_items?.unit || "",
+        domain: it.ops_items?.domain || srcReq.domain,
+        qty: it.qty, price: it.unit_price,
+      }));
+      renderBill();
+      const st = document.getElementById("save-status");
+      st.style.color = "var(--cyan)";
+      st.innerHTML = `📋 สั่งซ้ำจาก <b>${escapeHtml(srcReq.doc_no || ("#" + fromId))}</b> — ตรวจรายการ/ราคา แล้ว <b>แนบใบเทียบราคาใหม่</b> ก่อนส่ง`;
+    }
+  }
 })();
 </script>
 </body>
