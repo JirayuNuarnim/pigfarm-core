@@ -8,6 +8,12 @@ const SUPABASE_KEY = "sb_publishable_08HO-fBjfWEN_XNTFEp6ow_9JJzZSj9";
     l.rel = "icon"; l.href = "favicon.ico";
     document.head.appendChild(l);
   }
+  // warm up the connection to Supabase so the first data/storage call is faster
+  for (const rel of ["preconnect", "dns-prefetch"]) {
+    const p = document.createElement("link");
+    p.rel = rel; p.href = SUPABASE_URL; p.crossOrigin = "anonymous";
+    document.head.appendChild(p);
+  }
 })();
 
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);

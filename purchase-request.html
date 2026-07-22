@@ -575,16 +575,15 @@ async function renderAttachments(userId) {
       </div>`;
   }).join("");
 
-  // load thumbnail signed URLs; clicking any opens the full-screen viewer with all attachments
+  // load thumbnail signed URLs in ONE batch request; clicking any opens the full-screen viewer
   const imgs = [...container.querySelectorAll("img[data-path]")];
-  const signed = [];
-  for (const img of imgs) {
-    const { data } = await sb.storage.from("ops-attachments").createSignedUrl(img.dataset.path, 600);
-    const url = data?.signedUrl || "";
-    signed.push(url);
-    if (url) img.src = url;
+  const paths = imgs.map(img => img.dataset.path);
+  let signed = [];
+  if (paths.length) {
+    const { data } = await sb.storage.from("ops-attachments").createSignedUrls(paths, 600);
+    signed = (data || []).map(d => d?.signedUrl || "");
   }
-  imgs.forEach((img, i) => { img.style.cursor = "pointer"; img.onclick = () => openLightbox(signed, i); });
+  imgs.forEach((img, i) => { if (signed[i]) img.src = signed[i]; img.style.cursor = "pointer"; img.onclick = () => openLightbox(signed, i); });
 
   // mirror the attached images into the top gallery panel (like the create dashboard)
   const gal = document.getElementById("attached-docs");

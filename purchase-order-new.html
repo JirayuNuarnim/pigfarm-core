@@ -459,7 +459,7 @@ function renderAttachedDocs() {
     document.getElementById("manual-name").focus();
   });
 
-  const { data: sup } = await sb.from("ops_suppliers").select("*").order("name");
+  const { data: sup } = await sb.from("ops_suppliers").select("id, name, code, phone, bank, account_no").order("name");
   SUPPLIERS = sup || [];
   renderSuppliers();
 

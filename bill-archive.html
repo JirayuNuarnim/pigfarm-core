@@ -223,11 +223,8 @@ function exportCSV() {
 async function viewBillImages(id) {
   const paths = ATT[id] || [];
   if (!paths.length) return;
-  const urls = [];
-  for (const path of paths) {
-    const { data } = await sb.storage.from("ops-attachments").createSignedUrl(path, 600);
-    if (data?.signedUrl) urls.push(data.signedUrl);
-  }
+  const { data } = await sb.storage.from("ops-attachments").createSignedUrls(paths, 600);
+  const urls = (data || []).map(d => d?.signedUrl).filter(Boolean);
   if (urls.length) openLightbox(urls, 0);
 }
 
