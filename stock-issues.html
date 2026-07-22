@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ใบเบิกของ - THE CORE</title>
+<link rel="stylesheet" href="shared/style.css">
+<style>
+  .doc-paper { background:#f6f8fc; color:#0c1424; border-radius:12px; padding:18px 22px; max-width:520px; }
+  .doc-paper .m-farm { text-align:center; font-weight:800; font-size:15px; }
+  .doc-paper .m-title { text-align:center; font-weight:700; text-decoration:underline; margin:3px 0 10px; font-size:14px; }
+  .doc-paper .m-meta { display:flex; justify-content:space-between; font-size:12px; color:#42506e; margin-bottom:9px; font-family:ui-monospace,Consolas,monospace; flex-wrap:wrap; gap:4px; }
+  .doc-paper table { width:100%; border-collapse:collapse; }
+  .doc-paper th, .doc-paper td { border:1px solid #c9d3e6; padding:4px 7px; font-size:12px; }
+  .doc-paper th { background:#e6ecf7; }
+  .doc-paper td.r { text-align:right; }
+  .doc-paper .m-total { text-align:right; font-weight:800; margin-top:7px; font-family:ui-monospace,Consolas,monospace; }
+  .doc-paper .m-sign { display:flex; justify-content:space-around; margin-top:18px; font-size:11px; color:#42506e; text-align:center; }
+  .doc-paper .m-sign .ln { border-top:1px dotted #8595b5; padding-top:4px; width:100px; }
+  .photo-box img { max-width:220px; max-height:220px; border-radius:10px; border:1px solid var(--stroke); cursor:pointer; }
+  .who-badge { font-size:12px; border-radius:999px; padding:2px 10px; border:1px solid var(--stroke); }
+  .who-หมอ { color:var(--cyan); border-color:rgba(47,224,207,.4); }
+  .who-ช่าง { color:var(--amber); border-color:rgba(255,180,87,.4); }
+</style>
+</head>
+<body data-page="stock">
+<div class="layout">
+  <nav id="nav-root" class="sidebar no-print"></nav>
+  <main class="content" id="main">
+    <p class="muted">กำลังโหลด...</p>
+  </main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="shared/supabase-client.js"></script>
+<script src="shared/auth-guard.js"></script>
+<script src="shared/lightbox.js"></script>
+<script>
+const params = new URLSearchParams(window.location.search);
+const issueId = params.get("id");
+const main = document.getElementById("main");
+
+async function renderList() {
+  const { data: farms } = canSeeAllFarms() ? await sb.from("farms").select("name").order("name") : { data: myFarms().map(n => ({ name: n })) };
+  main.innerHTML = `
+    <div class="page-header">
+      <div><h1>📤 ใบเบิกของ</h1><p class="subtitle">เอกสารการเบิกทั้งหมด — กดดูรายละเอียด/พิมพ์ได้</p></div>
+      <a class="btn" href="stock-issue.html">+ สร้างใบเบิกใหม่</a>
+    </div>
+    <div class="card" style="display:flex; gap:14px; align-items:end; flex-wrap:wrap;">
+      <div class="field" style="margin:0; min-width:170px;"><label>ฟาร์ม</label>
+        <select id="farm-filter"><option value="">— ทุกฟาร์ม —</option>${(farms || []).map(f => `<option>${escapeHtml(f.name)}</option>`).join("")}</select>
+      </div>
+      <div class="field" style="margin:0; flex:1; min-width:200px;"><label>ค้นหา</label>
+        <input type="text" id="q" placeholder="เลขที่ / ชื่อผู้เบิก / หมายเหตุ">
+      </div>
+    </div>
+    <table>
+      <thead><tr><th>เลขที่</th><th>วันที่</th><th>ฟาร์ม</th><th>คลัง</th><th>ผู้เบิก</th><th>หมายเหตุ</th><th></th></tr></thead>
+      <tbody id="rows"><tr><td colspan="7" class="muted">กำลังโหลด...</td></tr></tbody>
+    </table>`;
+  const load = async () => {
+    const farm = document.getElementById("farm-filter").value;
+    const q = document.getElementById("q").value.trim();
+    let query = sb.from("ops_stock_issues").select("*").order("id", { ascending: false }).limit(200);
+    if (farm) query = query.eq("farm", farm);
+    if (q) query = query.or(`doc_no.ilike.%${q}%,issued_name.ilike.%${q}%,note.ilike.%${q}%`);
+    const { data, error } = await query;
+    const tbody = document.getElementById("rows");
+    if (error) { tbody.innerHTML = `<tr><td colspan="7" class="muted">${escapeHtml(error.message)}</td></tr>`; return; }
+    if (!data || !data.length) { tbody.innerHTML = '<tr><td colspan="7" class="muted">ยังไม่มีใบเบิก</td></tr>'; return; }
+    tbody.innerHTML = data.map(r => `
+      <tr>
+        <td><a class="link" href="stock-issues.html?id=${r.id}"><b>${escapeHtml(r.doc_no)}</b></a></td>
+        <td>${r.txn_date}</td>
+        <td>${escapeHtml(r.farm)}</td>
+        <td>${escapeHtml(DOMAIN_LABELS[r.domain] || r.domain)}</td>
+        <td><span class="who-badge who-${escapeHtml(r.issued_to)}">${escapeHtml(r.issued_to)}${r.issued_name ? " " + escapeHtml(r.issued_name) : ""}</span></td>
+        <td class="muted" style="font-size:13px;">${escapeHtml(r.note || "")}</td>
+        <td><a class="link" href="stock-issue-print.html?id=${r.id}" target="_blank">🖨️ พิมพ์</a></td>
+      </tr>`).join("");
+  };
+  await load();
+  document.getElementById("farm-filter").addEventListener("change", load);
+  document.getElementById("q").addEventListener("input", () => { clearTimeout(window.__t); window.__t = setTimeout(load, 300); });
+}
+
+async function renderDetail() {
+  const { data: doc } = await sb.from("ops_stock_issues").select("*").eq("id", issueId).single();
+  if (!doc) { main.innerHTML = '<p class="muted">ไม่พบใบเบิก</p>'; return; }
+  const { data: txns } = await sb.from("ops_stock_transactions")
+    .select("id, qty, item_id, ops_items(name, code, unit)")
+    .eq("ref_no", doc.doc_no).eq("farm", doc.farm).order("id");
+  const { data: atts } = await sb.from("ops_attachments")
+    .select("storage_path").eq("entity_type", "stock_issue").eq("entity_id", doc.id);
+  let photoUrl = null;
+  if (atts && atts.length) {
+    const { data: signed } = await sb.storage.from("ops-attachments").createSignedUrl(atts[0].storage_path, 3600);
+    photoUrl = signed && signed.signedUrl;
+  }
+  const items = (txns || []).map(t => ({ name: t.ops_items?.name || "", code: t.ops_items?.code || "", unit: t.ops_items?.unit || "", qty: Math.abs(Number(t.qty)) }));
+  const total = items.reduce((s, it) => s + it.qty, 0);
+
+  main.innerHTML = `
+    <div class="page-header">
+      <div><h1>${escapeHtml(doc.doc_no)} <span class="badge">ใบเบิกของ</span></h1>
+      <p class="subtitle">ฟาร์ม ${escapeHtml(doc.farm)} · ${escapeHtml(DOMAIN_LABELS[doc.domain] || doc.domain)} · วันที่ ${doc.txn_date}</p></div>
+      <div style="display:flex; gap:8px;">
+        <a class="btn secondary" href="stock-issues.html">← รายการใบเบิก</a>
+        <a class="btn secondary" href="stock-issue.html">+ สร้างใบเบิกใหม่</a>
+        <a class="btn" href="stock-issue-print.html?id=${doc.id}" target="_blank">🖨️ พิมพ์</a>
+      </div>
+    </div>
+
+    <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:flex-start;">
+      <div class="card" style="flex:1.3; min-width:340px;">
+        <h2>เอกสารใบเบิก</h2>
+        <div class="doc-paper">
+          <div class="m-farm">${escapeHtml(doc.farm)}</div>
+          <div class="m-title">ใบเบิกวัสดุอุปกรณ์</div>
+          <div class="m-meta"><span>เลขที่: ${escapeHtml(doc.doc_no)}</span><span>วันที่: ${doc.txn_date}</span><span>ผู้เบิก: ${escapeHtml(doc.issued_to)}${doc.issued_name ? " " + escapeHtml(doc.issued_name) : ""}</span></div>
+          <table><thead><tr><th style="width:30px">ที่</th><th>รายการ</th><th style="width:56px">จำนวน</th><th style="width:50px">หน่วย</th></tr></thead>
+          <tbody>${items.map((it, i) => `<tr><td class="r">${i + 1}</td><td>${escapeHtml(it.name)}</td><td class="r">${formatNumber(it.qty, 0)}</td><td>${escapeHtml(it.unit)}</td></tr>`).join("")}</tbody></table>
+          <div class="m-total">รวม ${formatNumber(total, 0)} ชิ้น (${items.length} รายการ)</div>
+          ${doc.note ? `<div style="font-size:12px;color:#42506e;margin-top:5px">หมายเหตุ: ${escapeHtml(doc.note)}</div>` : ""}
+          <div class="m-sign"><span class="ln">ผู้เบิก</span><span class="ln">ผู้จ่ายของ</span><span class="ln">ผู้ตรวจ</span></div>
+        </div>
+      </div>
+      <div class="card" style="flex:1; min-width:260px;">
+        <h2>📷 รูปหลักฐานการเบิก</h2>
+        <div class="photo-box">${photoUrl ? `<img src="${photoUrl}" onclick="openLightbox(['${photoUrl}'],0)">` : '<p class="muted">ไม่มีรูปแนบ</p>'}</div>
+        <p class="muted" style="font-size:12.5px; margin-top:10px;">บันทึกเมื่อ ${new Date(doc.created_at).toLocaleString("th-TH")}</p>
+      </div>
+    </div>`;
+}
+
+(async () => {
+  const user = await requireAuth();
+  if (!user) return;
+  if (issueId) await renderDetail(); else await renderList();
+})();
+</script>
+</body>
+</html>

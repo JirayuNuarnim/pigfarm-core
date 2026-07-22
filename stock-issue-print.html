@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<title>ใบเบิกของ - THE CORE</title>
+<link rel="stylesheet" href="shared/print.css">
+<style>
+  #qr-corner { position:absolute; top:10mm; right:12mm; text-align:center; width:30mm; }
+  #qrcode img, #qrcode canvas { width:26mm !important; height:26mm !important; }
+  #qr-corner .cap { font-size:9.5px; color:#333; margin-top:1mm; line-height:1.3; }
+  #qr-corner .doc-no { font-weight:bold; font-size:11px; }
+  #meta-right { padding-right:34mm; }
+</style>
+</head>
+<body>
+<div class="toolbar">
+  <a class="tb-btn secondary" id="back-btn" href="#">← กลับ</a>
+  <button onclick="window.print()">🖨️ พิมพ์</button>
+  <span class="tb-hint">ตัวอย่างก่อนพิมพ์ — ขนาดกระดาษ A4</span>
+</div>
+<div class="print-page" style="position:relative;">
+  <div id="qr-corner">
+    <div id="qrcode"></div>
+    <div class="cap"><span class="doc-no" id="qr-doc-no"></span><br>สแกนเพื่อเปิดเอกสาร</div>
+  </div>
+  <div class="doc-company" id="doc-farm"></div>
+  <div class="doc-title">ใบเบิกวัสดุอุปกรณ์</div>
+  <div class="doc-meta">
+    <div id="meta-left"></div>
+    <div id="meta-right"></div>
+  </div>
+  <table class="doc-table">
+    <thead><tr><th style="width:40px;">ลำดับ</th><th style="width:110px;">รหัส</th><th>รายการ</th><th>จำนวน</th><th>หน่วย</th></tr></thead>
+    <tbody id="rows"><tr><td colspan="5">กำลังโหลด...</td></tr></tbody>
+  </table>
+  <div class="doc-amount-text">รวมทั้งสิ้น <span class="box" id="total-text"></span></div>
+  <div class="signatures">
+    <div class="sig"><div class="line"></div>ผู้เบิก</div>
+    <div class="sig"><div class="line"></div>ผู้จ่ายของ</div>
+    <div class="sig"><div class="line"></div>ผู้ตรวจ</div>
+  </div>
+</div>
+<script src="shared/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="shared/supabase-client.js"></script>
+<script>
+(async () => {
+  const params = new URLSearchParams(window.location.search);
+  const id = params.get("id");
+  document.getElementById("back-btn").href = "stock-issues.html?id=" + encodeURIComponent(id);
+
+  const trackUrl = new URL("stock-issues.html?id=" + encodeURIComponent(id), window.location.href).href;
+  const qrEl = document.getElementById("qrcode");
+  if (window.QRCode && qrEl) {
+    new QRCode(qrEl, { text: trackUrl, width: 200, height: 200, correctLevel: QRCode.CorrectLevel.M });
+  }
+
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) { window.location.href = "index.html"; return; }
+
+  const { data: doc } = await sb.from("ops_stock_issues").select("*").eq("id", id).single();
+  if (!doc) return;
+  document.getElementById("qr-doc-no").textContent = doc.doc_no;
+  document.getElementById("doc-farm").textContent = doc.farm;
+
+  document.getElementById("meta-left").innerHTML = `
+    <div>เลขที่: ${escapeHtml(doc.doc_no)}</div>
+    <div>คลัง: ${escapeHtml(DOMAIN_LABELS[doc.domain] || doc.domain)}</div>
+    <div>ผู้เบิก: ${escapeHtml(doc.issued_to)}${doc.issued_name ? " " + escapeHtml(doc.issued_name) : ""}</div>`;
+  document.getElementById("meta-right").innerHTML = `
+    <div>วันที่: ${new Date(doc.txn_date).toLocaleDateString("th-TH")}</div>
+    ${doc.note ? `<div>หมายเหตุ: ${escapeHtml(doc.note)}</div>` : ""}`;
+
+  const { data: txns } = await sb.from("ops_stock_transactions")
+    .select("qty, ops_items(name, code, unit)")
+    .eq("ref_no", doc.doc_no).eq("farm", doc.farm).order("id");
+  let total = 0;
+  const rows = (txns || []).map((t, i) => {
+    const q = Math.abs(Number(t.qty));
+    total += q;
+    return `<tr>
+      <td class="num">${i + 1}</td>
+      <td>${escapeHtml(t.ops_items?.code || "")}</td>
+      <td>${escapeHtml(t.ops_items?.name || "")}</td>
+      <td class="num">${formatNumber(q, 0)}</td>
+      <td>${escapeHtml(t.ops_items?.unit || "")}</td>
+    </tr>`;
+  });
+  document.getElementById("rows").innerHTML = rows.join("") || '<tr><td colspan="5">ไม่มีรายการ</td></tr>';
+  document.getElementById("total-text").textContent = `${formatNumber(total, 0)} ชิ้น (${(txns || []).length} รายการ)`;
+})();
+</script>
+</body>
+</html>
