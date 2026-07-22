@@ -89,4 +89,21 @@ function renderNav() {
     await sb.auth.signOut();
     window.location.href = "index.html";
   });
+  updatePendingBadge();
+}
+
+// show a count of purchase requests waiting for the current user's action, on the nav link
+async function updatePendingBadge() {
+  let status = null;
+  if (isOwner()) status = "รออนุมัติเจ้าของ";
+  else if (isCentral()) status = "รอเสมียนกลาง";
+  else return; // farm clerks don't approve/process
+  try {
+    const { count } = await sb.from("ops_purchase_requests").select("id", { count: "exact", head: true }).eq("status", status);
+    const link = document.querySelector('#nav-root a[href="purchase-request.html"]');
+    if (link && count && count > 0) {
+      link.querySelector(".nav-badge")?.remove();
+      link.insertAdjacentHTML("beforeend", `<span class="nav-badge" title="รอดำเนินการ ${count} ใบ">${count}</span>`);
+    }
+  } catch (_) {}
 }

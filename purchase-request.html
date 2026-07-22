@@ -103,6 +103,7 @@ const KIND_LABEL = Object.fromEntries(ATT_KINDS.map(k => [k.key, k.label]));
 let ALL_ROWS = [];
 let ATT_COUNTS = {};
 let activeStage = "all";
+let activeSearch = "";
 
 async function loadListData() {
   const { data } = await sb.from("ops_purchase_requests").select("*").order("id", { ascending: false }).limit(300);
@@ -131,12 +132,14 @@ function renderList() {
       <button class="btn" id="new-btn">+ สร้างใบขอซื้อใหม่</button>
     </div>
     <div class="stage-tabs" id="stage-tabs"></div>
+    <input type="text" id="pr-search" placeholder="🔍 ค้นหา เลขที่ / ฟาร์ม / ผู้ขอ / หมวด" style="max-width:420px; margin-bottom:14px;">
     <table>
       <thead><tr><th>เลขที่</th><th>ฟาร์ม</th><th>หมวด</th><th>ผู้ขอ</th><th>วันที่</th><th>สถานะ</th><th>จ่ายเงิน</th><th>แนบ</th><th></th></tr></thead>
       <tbody id="pr-rows"><tr><td colspan="9" class="muted">กำลังโหลด...</td></tr></tbody>
     </table>
   `;
   document.getElementById("new-btn").addEventListener("click", () => window.location.href = "purchase-order-new.html");
+  document.getElementById("pr-search").addEventListener("input", (e) => { activeSearch = e.target.value.trim(); renderRows(); });
   renderTabs();
   renderRows();
 }
@@ -153,9 +156,13 @@ function renderTabs() {
 
 function renderRows() {
   const stage = STAGES.find(s => s.key === activeStage);
-  const rows = (stage.key === "all") ? ALL_ROWS : ALL_ROWS.filter(r => stage.statuses.includes(r.status));
+  let rows = (stage.key === "all") ? ALL_ROWS : ALL_ROWS.filter(r => stage.statuses.includes(r.status));
+  if (activeSearch) {
+    const q = activeSearch.toLowerCase();
+    rows = rows.filter(r => `${r.doc_no || ""} ${r.farm || ""} ${r.requested_by || ""} ${DOMAIN_LABELS[r.domain] || r.domain || ""}`.toLowerCase().includes(q));
+  }
   const tbody = document.getElementById("pr-rows");
-  if (!rows.length) { tbody.innerHTML = `<tr><td colspan="9" class="muted">ไม่มีรายการในสถานะนี้</td></tr>`; return; }
+  if (!rows.length) { tbody.innerHTML = `<tr><td colspan="9" class="muted">ไม่พบรายการ</td></tr>`; return; }
   tbody.innerHTML = rows.map(r => `
     <tr>
       <td>${escapeHtml(r.doc_no || "#" + r.id)}</td>
@@ -324,21 +331,22 @@ async function renderDetail() {
     <div class="card" id="items-card">
       <h2>รายการ ${canEdit ? '<span class="muted" style="font-size:13px; font-weight:normal;">— เสมียนกลางแก้ไขได้: ชื่อรายการ / จำนวน / ราคา / ตัดออก</span>' : ""}</h2>
       <table>
-        <thead><tr><th>รายการ</th><th>จำนวน</th><th>หน่วย</th><th>ราคา/หน่วย</th><th>รวม</th>${canEdit ? "<th></th>" : ""}</tr></thead>
+        <thead><tr><th>รายการ</th><th>จำนวน</th><th>หน่วย</th><th>ราคา/หน่วย</th><th>รวม</th><th>รับแล้ว</th>${canEdit ? "<th></th>" : ""}</tr></thead>
         <tbody id="items-body">
-          ${(items || []).map(it => `
+          ${(items || []).map(it => { const recv = Number(it.received_qty || 0); const short = it.qty - recv; return `
             <tr data-id="${it.id}">
               <td>${canEdit ? `<input type="text" class="pr-desc" value="${escapeHtml(it.description)}" style="width:100%; min-width:150px;">` : escapeHtml(it.description)}</td>
               <td class="text-right">${canEdit ? `<input type="number" step="0.01" class="pr-qty" value="${it.qty}" style="width:70px;">` : formatNumber(it.qty, 0)}</td>
               <td>${escapeHtml(it.unit || "")}</td>
               <td class="text-right">${canEdit ? `<input type="number" step="0.01" class="pr-price" value="${it.unit_price}" style="width:90px;">` : formatNumber(it.unit_price)}</td>
               <td class="text-right">${formatNumber(it.qty * it.unit_price)}</td>
+              <td class="text-right" style="white-space:nowrap;">${canEdit ? `<input type="number" step="0.01" class="pr-recv" value="${recv}" style="width:64px;"> / ${formatNumber(it.qty, 0)}` : `${formatNumber(recv, 0)} / ${formatNumber(it.qty, 0)}`}${(recv > 0 && short > 0) ? ` <span style="color:var(--amber);font-size:12px;">ขาด ${formatNumber(short, 0)}</span>` : (recv >= it.qty && recv > 0 ? ` <span style="color:var(--green);font-size:12px;">✓</span>` : "")}</td>
               ${canEdit ? `<td style="white-space:nowrap;"><button class="btn small save-price-btn">บันทึก</button> <button class="btn small danger del-item-btn">ตัดออก</button></td>` : ""}
-            </tr>
-          `).join("")}
-          <tr><td colspan="4" class="text-right"><b>รวมทั้งหมด</b></td><td class="text-right"><b>${formatNumber((items || []).reduce((s, it) => s + it.qty * it.unit_price, 0))}</b></td>${canEdit ? "<td></td>" : ""}</tr>
+            </tr>`; }).join("")}
+          <tr><td colspan="4" class="text-right"><b>รวมทั้งหมด</b></td><td class="text-right"><b>${formatNumber((items || []).reduce((s, it) => s + it.qty * it.unit_price, 0))}</b></td><td></td>${canEdit ? "<td></td>" : ""}</tr>
         </tbody>
       </table>
+      ${(() => { const shortItems = (items || []).filter(it => Number(it.received_qty || 0) > 0 && Number(it.received_qty || 0) < it.qty).length; const doneItems = (items || []).filter(it => Number(it.received_qty || 0) >= it.qty && it.qty > 0).length; if (!doneItems && !shortItems) return ""; return `<p style="margin-top:10px;font-size:13px;">${shortItems ? `<span style="color:var(--amber);">⚠ ของมาไม่ครบ ${shortItems} รายการ</span>` : `<span style="color:var(--green);">✓ รับของครบทุกรายการ</span>`}</p>`; })()}
       ${canEdit ? '<button class="btn small secondary" id="add-item-btn" style="margin-top:10px;">+ เพิ่มรายการ</button>' : ""}
     </div>
 
@@ -407,7 +415,8 @@ async function renderDetail() {
       const description = row.querySelector(".pr-desc").value.trim();
       const qty = parseFloat(row.querySelector(".pr-qty").value) || 0;
       const price = parseFloat(row.querySelector(".pr-price").value) || 0;
-      const { error } = await sb.from("ops_purchase_request_items").update({ description, qty, unit_price: price }).eq("id", row.dataset.id);
+      const received_qty = parseFloat(row.querySelector(".pr-recv")?.value) || 0;
+      const { error } = await sb.from("ops_purchase_request_items").update({ description, qty, unit_price: price, received_qty }).eq("id", row.dataset.id);
       document.getElementById("action-status").textContent = error ? ("บันทึกไม่สำเร็จ: " + error.message) : "บันทึกรายการแล้ว";
       if (!error) renderDetail();
     });

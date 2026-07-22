@@ -177,7 +177,7 @@
   <div class="topbar">
     <div class="brand"><span class="mark">◆</span><span>THE&nbsp;CORE<small>สร้างใบขอซื้อ · จัดซื้อกลาง</small></span></div>
     <div class="spacer"></div>
-    <div class="chip"><span class="k">บริษัท</span><select id="company" class="chip-sel"></select><button class="chip-add" id="add-company-btn" type="button" title="เพิ่มบริษัท">＋</button></div>
+    <div class="chip"><span class="k">บริษัท</span><select id="company" class="chip-sel"></select><button class="chip-add" id="edit-company-btn" type="button" title="แก้ไขที่อยู่/เลขภาษีบริษัท">✎</button><button class="chip-add" id="add-company-btn" type="button" title="เพิ่มบริษัท">＋</button></div>
     <a class="backlink" href="purchase-request.html">← กลับรายการ</a>
     <div class="avatar" id="user-avatar">·</div>
   </div>
@@ -426,8 +426,10 @@ function renderAttachedDocs() {
   farmSel.innerHTML = farms.map(f => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join("");
 
   const companySel = document.getElementById("company");
+  let COMPANIES = {};
   async function loadCompanies(selectId) {
-    const { data } = await sb.from("ops_companies").select("id, name").eq("active", true).order("name");
+    const { data } = await sb.from("ops_companies").select("id, name, address, tax_id, phone").eq("active", true).order("name");
+    COMPANIES = {}; (data || []).forEach(c => COMPANIES[c.id] = c);
     companySel.innerHTML = `<option value="">— ไม่ระบุ —</option>` + (data || []).map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join("");
     if (selectId) companySel.value = selectId;
     renderPreview();
@@ -439,6 +441,16 @@ function renderAttachedDocs() {
     const { data, error } = await sb.from("ops_companies").insert({ name: name.trim() }).select("id").single();
     if (error) { alert("เพิ่มบริษัทไม่สำเร็จ: " + error.message); return; }
     await loadCompanies(data.id);
+  });
+  document.getElementById("edit-company-btn").addEventListener("click", async () => {
+    const id = companySel.value; if (!id) { alert("เลือกบริษัทก่อน"); return; }
+    const c = COMPANIES[id] || {};
+    const address = prompt("ที่อยู่บริษัท (ขึ้นหัวเอกสาร)", c.address || ""); if (address === null) return;
+    const tax_id = prompt("เลขประจำตัวผู้เสียภาษี", c.tax_id || ""); if (tax_id === null) return;
+    const phone = prompt("เบอร์โทรบริษัท", c.phone || ""); if (phone === null) return;
+    const { error } = await sb.from("ops_companies").update({ address: address.trim(), tax_id: tax_id.trim(), phone: phone.trim() }).eq("id", id);
+    if (error) { alert("บันทึกไม่สำเร็จ: " + error.message); return; }
+    await loadCompanies(id); alert("บันทึกข้อมูลบริษัทแล้ว");
   });
 
   const domainOpts = (canSeeAllFarms() ? Object.keys(DOMAIN_LABELS) : myDomains());
