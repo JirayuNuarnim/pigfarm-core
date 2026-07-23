@@ -107,7 +107,36 @@
   .bill-card .stx{font-size:10px;text-align:center;color:var(--muted)}
 
   .hint{position:absolute;left:50%;bottom:8px;transform:translateX(-50%);font-size:11.5px;color:var(--dim);white-space:nowrap}
-  @media(max-width:900px){.panel{width:calc(100vw - 30px);right:15px}}
+
+  /* floating particles */
+  @keyframes rise{0%{transform:translateY(12vh) scale(.6);opacity:0}12%{opacity:.7}88%{opacity:.5}100%{transform:translateY(-105vh) scale(1.15);opacity:0}}
+  .pt{position:fixed;bottom:-10px;border-radius:50%;background:#31d8ff;pointer-events:none;z-index:0;
+    box-shadow:0 0 8px rgba(49,216,255,.8);animation:rise linear infinite}
+
+  /* live ticker */
+  .ticker{display:flex;align-items:center;gap:10px;margin-top:2px;border:1px solid var(--stroke);border-radius:12px;
+    background:rgba(8,22,42,.75);padding:7px 14px;overflow:hidden}
+  .ticker .tl{flex:0 0 auto;font-size:10.5px;letter-spacing:.16em;color:var(--neon);display:flex;align-items:center;gap:6px}
+  .ticker .tl .d{width:7px;height:7px;border-radius:50%;background:var(--neon);box-shadow:0 0 9px var(--neon);animation:corePulse 1.4s ease-in-out infinite}
+  .tk-view{flex:1;overflow:hidden;white-space:nowrap;position:relative;mask-image:linear-gradient(90deg,transparent,#000 4%,#000 96%,transparent)}
+  @keyframes marquee{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+  .tk-track{display:inline-flex;gap:34px;padding-right:34px;animation:marquee 40s linear infinite;will-change:transform}
+  .tk-track:hover{animation-play-state:paused}
+  .tk-item{font-size:12.5px;color:var(--muted)}
+  .tk-item b{color:var(--text);font-weight:600}
+  .tk-item .up{color:var(--green)} .tk-item .dn2{color:var(--red)} .tk-item .doc{color:var(--neon);font-family:var(--font-mono)}
+
+  /* node LED */
+  .fnode .led{animation:corePulse 2s ease-in-out infinite}
+
+  /* dim overlay when bills float */
+  .dimmer{position:absolute;inset:0;z-index:20;background:radial-gradient(circle at 50% 46%, rgba(4,10,20,.1), rgba(3,8,16,.78) 75%);
+    opacity:0;transition:opacity .3s;pointer-events:none}
+  .dimmer.on{opacity:1;pointer-events:auto}
+  .dimmer .close-tip{position:absolute;top:14px;left:50%;transform:translateX(-50%);font-size:12px;color:var(--muted);
+    border:1px solid var(--stroke-2);border-radius:999px;padding:5px 16px;background:rgba(8,20,38,.9)}
+
+  @media(max-width:900px){.panel{width:calc(100vw - 30px);right:15px}.stage{min-height:430px}.stage svg{min-height:430px}.hint{display:none}}
 </style>
 </head>
 <body data-page="dashboard">
@@ -134,7 +163,13 @@
 
   <div class="stage" id="stage">
     <svg id="neural" viewBox="0 0 1400 760" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="dimmer" id="dimmer"><span class="close-tip">กดที่ว่าง หรือกดสมองอีกครั้ง เพื่อปิดบิล</span></div>
     <div class="hint">💡 กดจุดฟาร์มเพื่อดูคลังก่อสร้าง · กดสมองตรงกลางเพื่อเรียกบิลใบขอซื้อล่าสุดลอยออกมา</div>
+  </div>
+
+  <div class="ticker">
+    <span class="tl"><span class="d"></span>LIVE&nbsp;FEED</span>
+    <div class="tk-view"><div class="tk-track" id="tk-track"><span class="tk-item">กำลังเชื่อมต่อระบบประสาท...</span></div></div>
   </div>
 </div>
 
@@ -226,8 +261,19 @@ async function loadData() {
 
 /* ---------- neural stage ---------- */
 const CX = 700, CY = 390;
+
+// อารมณ์ของสมองตามสถานการณ์จริง: ฟ้า=ปกติ / ส้ม=มีงานค้าง / แดง=ของหมดเยอะ
+function systemMood() {
+  const totalOut = FARMS.reduce((s, f) => s + (AGG[f]?.out || 0), 0);
+  const pending = Number(document.getElementById("st-pending").textContent) || 0;
+  if (totalOut >= 30) return { c: "#ff6274", glowc: "rgba(255,98,116,.5)", label: `⚠ ALERT · ของหมด ${totalOut} รายการ — ควรสั่งซื้อ` };
+  if (pending > 0) return { c: "#ffb457", glowc: "rgba(255,180,87,.5)", label: `● BUSY · รอดำเนินการ ${pending} ใบ` };
+  return { c: "#31d8ff", glowc: "rgba(49,216,255,.5)", label: "● ONLINE · ระบบปกติทุกคลัง" };
+}
+
 function buildStage() {
   const svg = document.getElementById("neural");
+  const mood = systemMood();
   const slots = [   // ตำแหน่งรอบสมอง (ขวา 4 · ซ้าย 3 ตามภาพวงจร)
     { x: 1120, y: 120 }, { x: 1215, y: 300 }, { x: 1215, y: 480 }, { x: 1120, y: 650 },
     { x: 175, y: 130 }, { x: 95, y: 390 }, { x: 175, y: 645 },
@@ -237,7 +283,14 @@ function buildStage() {
       <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
         <feGaussianBlur stdDeviation="5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
       </filter>
+      <filter id="soft" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="16"/></filter>
       <clipPath id="rightHalf"><rect x="${CX}" y="${CY - 190}" width="200" height="380"/></clipPath>
+      <clipPath id="leftHalf"><rect x="${CX - 200}" y="${CY - 190}" width="200" height="380"/></clipPath>
+      <radialGradient id="brainFill" cx="42%" cy="36%">
+        <stop offset="0" stop-color="#1d5d94" stop-opacity=".55"/>
+        <stop offset=".6" stop-color="#123a66" stop-opacity=".4"/>
+        <stop offset="1" stop-color="#0a1f3c" stop-opacity=".35"/>
+      </radialGradient>
       <linearGradient id="lineGrad" x1="0" y1="0" x2="1" y2="0">
         <stop offset="0" stop-color="#31d8ff" stop-opacity=".9"/><stop offset="1" stop-color="#155a86" stop-opacity=".55"/>
       </linearGradient>
@@ -259,7 +312,7 @@ function buildStage() {
     `M ${CX - 70} ${CY - 150} C ${CX - 30} ${CY - 120}, ${CX - 75} ${CY - 95}, ${CX - 25} ${CY - 80} C ${CX - 60} ${CY - 55}, ${CX - 20} ${CY - 35}, ${CX - 35} ${CY - 10}`,
     `M ${CX - 40} ${CY + 30} C ${CX - 10} ${CY + 45}, ${CX - 45} ${CY + 90}, ${CX - 12} ${CY + 120} C ${CX - 35} ${CY + 140}, ${CX - 70} ${CY + 130}, ${CX - 72} ${CY + 105}`,
   ].map(d => `<path class="gyri" d="${d}" fill="none" stroke="#31d8ff" stroke-width="2.4" stroke-linecap="round" opacity=".85"/>`).join("");
-  // binary right half
+  // binary right half + circuit traces
   let bins = "";
   for (let c = 0; c < 6; c++) {
     for (let r = 0; r < 9; r++) {
@@ -268,42 +321,68 @@ function buildStage() {
       bins += `<text class="bin" x="${x}" y="${y}" font-size="${11 + Math.random() * 5}" style="animation-duration:${(2 + Math.random() * 3).toFixed(1)}s;animation-delay:${(Math.random() * 2).toFixed(1)}s">${s}</text>`;
     }
   }
+  // เส้นวงจรบางๆ ซ้อนในซีกขวา
+  let traces = "";
+  for (let i = 0; i < 4; i++) {
+    const y0 = CY - 120 + i * 66, x0 = CX + 12;
+    traces += `<path d="M ${x0} ${y0} h ${34 + i * 8} l 18 ${i % 2 ? 16 : -16} h ${30}" fill="none" stroke="#31d8ff" stroke-width="1.1" opacity=".4"/>
+      <circle cx="${x0 + 34 + i * 8 + 48}" cy="${y0 + (i % 2 ? 16 : -16)}" r="2.6" fill="#31d8ff" opacity=".7"/>`;
+  }
+  // ซินแนปส์กะพริบในซีกซ้าย (จุดประกายความคิด)
+  let syns = "";
+  for (let i = 0; i < 12; i++) {
+    const x = CX - 150 + Math.random() * 130, y = CY - 130 + Math.random() * 260;
+    syns += `<circle cx="${x.toFixed(0)}" cy="${y.toFixed(0)}" r="${(1.6 + Math.random() * 1.8).toFixed(1)}" fill="#7ff0ff" filter="url(#glow)"
+      style="animation:blink ${(1.4 + Math.random() * 2.4).toFixed(1)}s ease-in-out ${(Math.random() * 2).toFixed(1)}s infinite" opacity=".8"/>`;
+  }
   // energy waves (ซ้ายเข้าสมอง)
   const waves = [-95, -40, 20, 75].map((dy, i) =>
     `<path class="wave" style="animation-duration:${1.3 + i * .25}s" d="M 285 ${CY + dy} C 380 ${CY + dy - 35}, 430 ${CY + dy + 30}, ${CX - 175} ${CY + dy * .45}" fill="none" stroke="#31d8ff" stroke-width="2.2" opacity=".65" filter="url(#glow)"/>`).join("");
 
-  // ===== farm nodes + circuits =====
+  // ===== farm nodes + circuits (สว่าง/เร็วตามความเคลื่อนไหวจริง 7 วัน) =====
   let lines = "", nodes = "", dots = "";
   FARMS.forEach((f, i) => {
     const s = slots[i % slots.length];
     const a = AGG[f] || { has: 0, out: 0 };
+    const m = MOVE7[f] || { recv: 0, iss: 0 };
+    const activity = m.recv + m.iss;
+    const active = activity > 0 || a.has > 0;
     const right = s.x > CX;
     const sx = right ? CX + 150 : CX - 150;
     const sy = CY + (s.y - CY) * 0.28;
     const ex = right ? s.x - 100 : s.x + 100;
     const midx = (sx + ex) / 2;
     const path = `M ${sx} ${sy} L ${midx} ${sy} L ${midx + (right ? 34 : -34)} ${s.y} L ${ex} ${s.y}`;
-    lines += `<path id="ln${i}" d="${path}" fill="none" stroke="url(#lineGrad)" stroke-width="1.8" opacity=".8"/>
-      <circle cx="${ex}" cy="${s.y}" r="4.5" fill="#31d8ff" filter="url(#glow)"/>`;
-    dots += `<circle r="4" fill="#7ff0ff" filter="url(#glow)"><animateMotion dur="${(2.2 + i * .5).toFixed(1)}s" repeatCount="indefinite" keyPoints="${right ? "0;1" : "1;0"}" keyTimes="0;1"><mpath href="#ln${i}"/></animateMotion></circle>`;
-    nodes += `<g class="fnode" data-farm="${escapeHtml(f)}" transform="translate(${s.x - 95}, ${s.y - 34})">
+    lines += `<path id="ln${i}" d="${path}" fill="none" stroke="url(#lineGrad)" stroke-width="${active ? 2.2 : 1.4}" opacity="${active ? .95 : .4}"/>
+      <circle cx="${ex}" cy="${s.y}" r="4.5" fill="#31d8ff" filter="url(#glow)" opacity="${active ? 1 : .5}"/>`;
+    dots += `<circle r="${active ? 4.5 : 3}" fill="#7ff0ff" filter="url(#glow)" opacity="${active ? 1 : .45}"><animateMotion dur="${(active ? 1.6 + i * .3 : 4.5 + i * .4).toFixed(1)}s" repeatCount="indefinite" keyPoints="${right ? "0;1" : "1;0"}" keyTimes="0;1"><mpath href="#ln${i}"/></animateMotion></circle>`;
+    if (active) {  // พัลส์สวนกลับอีกทาง (คุยสองทางกับสมอง)
+      dots += `<circle r="2.6" fill="#38e08a" opacity=".85"><animateMotion dur="${(2.6 + i * .35).toFixed(1)}s" begin="${(i * .4).toFixed(1)}s" repeatCount="indefinite" keyPoints="${right ? "1;0" : "0;1"}" keyTimes="0;1"><mpath href="#ln${i}"/></animateMotion></circle>`;
+    }
+    const ledColor = a.has > 0 ? "#38e08a" : (a.out > 0 ? "#ffb457" : "#48688a");
+    nodes += `<g class="fnode" data-farm="${escapeHtml(f)}" transform="translate(${s.x - 95}, ${s.y - 34})" opacity="${active ? 1 : .68}">
       <rect width="190" height="68" rx="14"/>
+      <circle class="led" cx="176" cy="14" r="4.5" fill="${ledColor}" filter="url(#glow)"/>
       <text class="fn" x="14" y="24">${escapeHtml(f)}</text>
       <text class="fd" x="14" y="40">คลังก่อสร้าง · CONSTRUCTION</text>
-      <text class="fs" x="14" y="57">มีของ ${a.has} <tspan class="hot">· หมด ${a.out}</tspan></text>
+      <text class="fs" x="14" y="57">มีของ ${a.has} <tspan class="hot">· หมด ${a.out}</tspan>${activity ? ` <tspan fill="#38e08a">· ↕${formatNumber(activity, 0)}</tspan>` : ""}</text>
     </g>`;
   });
 
   svg.innerHTML = `${defs}
+    <ellipse cx="${CX}" cy="${CY + 240}" rx="220" ry="26" fill="${mood.c}" opacity=".1" filter="url(#soft)"/>
+    <ellipse cx="${CX}" cy="${CY}" rx="260" ry="245" fill="${mood.c}" opacity=".05" filter="url(#soft)"/>
     ${waves}
     ${lines}
     <g class="brain-g" style="--ox:${CX}px;--oy:${CY}px">
-      <path d="${brainOutline}" fill="rgba(18,50,86,.35)" stroke="#31d8ff" stroke-width="3" filter="url(#glow)"/>
-      ${gyri}
-      <g clip-path="url(#rightHalf)">${bins}</g>
+      <path d="${brainOutline}" fill="url(#brainFill)" stroke="#31d8ff" stroke-width="3" filter="url(#glow)"/>
+      <g clip-path="url(#leftHalf)">${gyri}${syns}</g>
+      <g clip-path="url(#rightHalf)">${bins}${traces}</g>
       <line x1="${CX}" y1="${CY - 172}" x2="${CX}" y2="${CY + 165}" stroke="#155a86" stroke-width="1.4" opacity=".7"/>
-      <circle class="core-ring" cx="${CX}" cy="${CY}" r="205" fill="none" stroke="#31d8ff" stroke-width="1" opacity=".35" stroke-dasharray="4 9"/>
-      <text x="${CX}" y="${CY + 232}" text-anchor="middle" fill="#7fa3c4" font-size="12.5" letter-spacing=".2em">THE CORE — กดสมองเพื่อเรียกบิลล่าสุด</text>
+      <circle class="core-ring" cx="${CX}" cy="${CY}" r="205" fill="none" stroke="${mood.c}" stroke-width="1.2" opacity=".45" stroke-dasharray="4 9"/>
+      <circle class="core-ring" cx="${CX}" cy="${CY}" r="222" fill="none" stroke="${mood.c}" stroke-width=".7" opacity=".22" stroke-dasharray="2 14" style="animation-delay:1.2s"/>
+      <text x="${CX}" y="${CY + 246}" text-anchor="middle" fill="${mood.c}" font-size="13" font-weight="700" letter-spacing=".14em" filter="url(#glow)">${mood.label}</text>
+      <text x="${CX}" y="${CY + 266}" text-anchor="middle" fill="#48688a" font-size="11" letter-spacing=".18em">THE CORE — กดสมองเพื่อเรียกบิลล่าสุด</text>
     </g>
     ${dots}
     ${nodes}
@@ -346,10 +425,18 @@ async function openFarm(farm, nodeEl) {
 }
 
 /* ---------- floating bills ---------- */
+function closeBills() {
+  const stage = document.getElementById("stage");
+  stage.querySelectorAll(".bill-card").forEach(el => el.remove());
+  document.getElementById("dimmer").classList.remove("on");
+  billsOpen = false;
+}
+
 async function toggleBills() {
   const stage = document.getElementById("stage");
-  if (billsOpen) { stage.querySelectorAll(".bill-card").forEach(el => el.remove()); billsOpen = false; return; }
+  if (billsOpen) { closeBills(); return; }
   billsOpen = true;
+  document.getElementById("dimmer").classList.add("on");
   const { data: prs } = await sb.from("ops_purchase_requests").select("id, doc_no, status, farm")
     .neq("status", "ยกเลิก").order("id", { ascending: false }).limit(8);
   if (!prs || !prs.length) return;
@@ -387,15 +474,52 @@ async function toggleBills() {
   });
 }
 
+/* ---------- อนุภาคลอย (บรรยากาศมีชีวิต) ---------- */
+function spawnParticles() {
+  for (let i = 0; i < 22; i++) {
+    const p = document.createElement("div");
+    p.className = "pt";
+    const sz = (1.5 + Math.random() * 2.5).toFixed(1);
+    p.style.cssText = `left:${(Math.random() * 100).toFixed(1)}vw;width:${sz}px;height:${sz}px;
+      animation-duration:${(9 + Math.random() * 16).toFixed(1)}s;animation-delay:${(-Math.random() * 20).toFixed(1)}s;opacity:${(.25 + Math.random() * .4).toFixed(2)}`;
+    document.body.appendChild(p);
+  }
+}
+
+/* ---------- LIVE FEED — เหตุการณ์ล่าสุดวิ่งใต้จอ ---------- */
+async function loadTicker() {
+  const items = [];
+  const [{ data: tx }, { data: prs }] = await Promise.all([
+    sb.from("ops_stock_transactions").select("txn_date, txn_type, qty, farm, ref_no, ops_items(name)").order("id", { ascending: false }).limit(12),
+    sb.from("ops_purchase_requests").select("doc_no, status, farm, updated_at").order("updated_at", { ascending: false }).limit(6),
+  ]);
+  for (const p of (prs || [])) {
+    items.push(`<span class="tk-item">🧾 <span class="doc">${escapeHtml(p.doc_no || "")}</span> <b>${escapeHtml(p.status)}</b> · ${escapeHtml(p.farm)}</span>`);
+  }
+  for (const t of (tx || [])) {
+    const isIn = t.txn_type === "รับเข้า" || t.txn_type === "โอนเข้า";
+    const cls = isIn ? "up" : (t.txn_type === "ปรับปรุงยอด" ? "" : "dn2");
+    items.push(`<span class="tk-item">${isIn ? "📥" : "📤"} <span class="${cls}">${escapeHtml(t.txn_type)}</span> <b>${escapeHtml(t.ops_items?.name || "")}</b> ×${formatNumber(Math.abs(Number(t.qty)), 0)} · ${escapeHtml(t.farm)}${t.ref_no ? ` <span class="doc">${escapeHtml(t.ref_no)}</span>` : ""}</span>`);
+  }
+  if (!items.length) items.push('<span class="tk-item">ยังไม่มีเหตุการณ์วันนี้ — ระบบพร้อมทำงาน</span>');
+  // ทำซ้ำสองรอบเพื่อ loop เนียน
+  document.getElementById("tk-track").innerHTML = items.join("") + items.join("");
+}
+
 (async () => {
   const user = await requireAuth();
   if (!user) return;
+  spawnParticles();
   await loadData();
   buildStage();
+  loadTicker();
+  setInterval(loadTicker, 90000);   // อัปเดตข่าวทุก 1.5 นาที
   document.getElementById("p-close").addEventListener("click", () => {
     document.getElementById("farm-panel").classList.remove("open");
     document.querySelectorAll(".fnode").forEach(n => n.classList.remove("sel"));
   });
+  document.getElementById("dimmer").addEventListener("click", () => closeBills());
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeBills(); });
 })();
 </script>
 </body>
