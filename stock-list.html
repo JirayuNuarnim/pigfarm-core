@@ -63,6 +63,13 @@
       </label>
     </div>
 
+    <div class="card" id="move-chart-card">
+      <h2 style="margin:0 0 4px; font-size:16px;">📈 รับเข้า – เบิกออก 30 วันล่าสุด
+        <span class="muted" style="font-size:12px; font-weight:normal;">— เขียว = รับเข้า (จากใบขอซื้อที่รับของแล้ว/โอนเข้า) · แดง = เบิกออก/โอนออก · กดแท่งเพื่อดูรายการ</span></h2>
+      <div id="move-chart" style="display:flex; align-items:flex-end; gap:3px; height:120px; padding-top:10px; overflow-x:auto;"></div>
+      <div id="move-detail" style="display:none; border-top:1px solid var(--stroke); margin-top:10px; padding-top:10px;"></div>
+    </div>
+
     <p class="muted" id="count-line" style="margin:4px 0 8px; font-size:13px;"></p>
     <table>
       <thead><tr><th style="width:110px;">รหัส</th><th>สินค้า</th><th>หน่วย</th><th>คงเหลือ</th><th>ราคา/หน่วย</th><th></th></tr></thead>
@@ -130,6 +137,85 @@ async function loadFarmData() {
   }
   buildCategoryFilters();
   renderItems();
+  loadMoveChart();
+}
+
+/* ===== กราฟรับเข้า-เบิกออก 30 วันล่าสุด ===== */
+let MOVES = {};   // "YYYY-MM-DD" -> {in, out, rows:[{name,type,qty,note}]}
+async function loadMoveChart() {
+  const farm = document.getElementById("farm-filter").value;
+  const start = new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10);
+  const chart = document.getElementById("move-chart");
+  chart.innerHTML = '<span class="muted" style="font-size:12px;">กำลังโหลด...</span>';
+  let txns = [], from = 0;
+  while (true) {
+    const { data, error } = await sb.from("ops_stock_transactions")
+      .select("txn_date, txn_type, qty, note, ops_items!inner(name, domain)")
+      .eq("farm", farm).eq("ops_items.domain", domain).gte("txn_date", start)
+      .order("txn_date").range(from, from + 999);
+    if (error) { chart.innerHTML = `<span class="muted" style="font-size:12px;">${escapeHtml(error.message)}</span>`; return; }
+    txns = txns.concat(data || []);
+    if (!data || data.length < 1000) break;
+    from += 1000;
+  }
+  MOVES = {};
+  for (const t of txns) {
+    const q = Number(t.qty);
+    let dir = null;
+    if (t.txn_type === "รับเข้า" || t.txn_type === "โอนเข้า") dir = "in";
+    else if (t.txn_type === "เบิกจ่าย" || t.txn_type === "โอนออก") dir = "out";
+    if (!dir) continue;  // ไม่นับปรับปรุงยอด
+    const m = MOVES[t.txn_date] = MOVES[t.txn_date] || { in: 0, out: 0, rows: [] };
+    m[dir] += Math.abs(q);
+    m.rows.push({ name: t.ops_items?.name || "", type: t.txn_type, qty: Math.abs(q), note: t.note || "" });
+  }
+  renderMoveChart();
+}
+
+function renderMoveChart() {
+  const chart = document.getElementById("move-chart");
+  document.getElementById("move-detail").style.display = "none";
+  const days = [];
+  for (let i = 29; i >= 0; i--) days.push(new Date(Date.now() - i * 86400000).toISOString().slice(0, 10));
+  const maxV = Math.max(1, ...days.map(d => Math.max(MOVES[d]?.in || 0, MOVES[d]?.out || 0)));
+  const anyData = days.some(d => MOVES[d]);
+  if (!anyData) { chart.innerHTML = '<span class="muted" style="font-size:12.5px;">ยังไม่มีการรับเข้า/เบิกออกใน 30 วันล่าสุด</span>'; return; }
+  chart.innerHTML = days.map(d => {
+    const m = MOVES[d] || { in: 0, out: 0 };
+    const hIn = Math.round((m.in / maxV) * 86);
+    const hOut = Math.round((m.out / maxV) * 86);
+    const dt = new Date(d + "T00:00:00");
+    const lbl = `${dt.getDate()}/${dt.getMonth() + 1}`;
+    const has = m.in || m.out;
+    return `<div class="mc-day" data-d="${d}" title="${lbl} — รับ ${formatNumber(m.in, 0)} / จ่าย ${formatNumber(m.out, 0)}"
+        style="flex:1; min-width:16px; display:flex; flex-direction:column; align-items:center; gap:2px; cursor:${has ? "pointer" : "default"};">
+      <div style="display:flex; align-items:flex-end; gap:2px; height:88px;">
+        <div style="width:7px; height:${Math.max(hIn, m.in ? 3 : 1)}px; border-radius:2px 2px 0 0; background:${m.in ? "var(--green)" : "rgba(140,170,255,.12)"};"></div>
+        <div style="width:7px; height:${Math.max(hOut, m.out ? 3 : 1)}px; border-radius:2px 2px 0 0; background:${m.out ? "var(--red)" : "rgba(140,170,255,.12)"};"></div>
+      </div>
+      <div class="muted" style="font-size:9.5px; white-space:nowrap;">${lbl}</div>
+    </div>`;
+  }).join("");
+  chart.querySelectorAll(".mc-day").forEach(el => el.addEventListener("click", () => showMoveDetail(el.dataset.d)));
+}
+
+function showMoveDetail(d) {
+  const m = MOVES[d];
+  const box = document.getElementById("move-detail");
+  if (!m || !m.rows.length) { box.style.display = "none"; return; }
+  const dt = new Date(d + "T00:00:00").toLocaleDateString("th-TH", { year: "numeric", month: "long", day: "numeric" });
+  const color = (t) => (t === "รับเข้า" || t === "โอนเข้า") ? "var(--green)" : "var(--red)";
+  box.style.display = "";
+  box.innerHTML = `<b style="font-size:13.5px;">รายการวันที่ ${dt}</b>
+    <span class="muted" style="font-size:12px;"> — รับเข้า ${formatNumber(m.in, 0)} · จ่ายออก ${formatNumber(m.out, 0)}</span>
+    <table style="margin-top:6px;"><thead><tr><th>ประเภท</th><th>สินค้า</th><th class="text-right">จำนวน</th><th>อ้างอิง</th></tr></thead><tbody>
+    ${m.rows.map(r => `<tr>
+      <td><span style="color:${color(r.type)}; font-size:13px;">${escapeHtml(r.type)}</span></td>
+      <td>${escapeHtml(r.name)}</td>
+      <td class="text-right">${formatNumber(r.qty, 0)}</td>
+      <td class="muted" style="font-size:12px;">${escapeHtml(r.note)}</td>
+    </tr>`).join("")}
+    </tbody></table>`;
 }
 
 function buildCategoryFilters() {
