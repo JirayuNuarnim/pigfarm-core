@@ -451,11 +451,36 @@ async function renderDetail() {
       <p class="subtitle" style="margin-top:-6px;">แนบรูปใบอนุมัติที่ปริ๊นเซ็นแล้ว, บิล/ใบเสร็จ, หลักฐานจ่ายเงิน และหลักฐานส่งของ</p>
       <div id="att-cats">กำลังโหลด...</div>
     </div>
+
+    ${canManage ? `
+    <div class="card">
+      <h2>🕘 ประวัติการแก้ไขเอกสาร <span class="muted" style="font-size:13px; font-weight:normal;">— บันทึกอัตโนมัติทุกการเปลี่ยนแปลง แก้/ลบไม่ได้ ติดตัวเอกสารตลอด</span></h2>
+      <div id="edit-history"><p class="muted" style="font-size:13px;">กำลังโหลด...</p></div>
+    </div>` : ""}
   `;
 
   const supplierName = (suppliers || []).find(s => s.id == req.supplier_id)?.name || "";
   const companyName = (companies || []).find(c => c.id == req.company_id)?.name || "";
   renderDocPreview(req, items, supplierName, companyName);
+  if (canManage) loadEditHistory();
+
+  async function loadEditHistory() {
+    const box = document.getElementById("edit-history");
+    if (!box) return;
+    const { data, error } = await sb.from("ops_audit_log")
+      .select("ts, action, note")
+      .eq("entity", "purchase_request").eq("entity_id", String(requestId))
+      .order("ts", { ascending: false }).limit(200);
+    if (error) { box.innerHTML = `<p class="muted" style="font-size:13px;">โหลดประวัติไม่สำเร็จ: ${escapeHtml(error.message)}</p>`; return; }
+    if (!data || !data.length) { box.innerHTML = '<p class="muted" style="font-size:13px;">ยังไม่มีการแก้ไขหลังจากนี้ — ทุกการเปลี่ยนแปลงจะถูกบันทึกที่นี่อัตโนมัติ</p>'; return; }
+    const icon = (a) => a === "create" ? "🆕" : a === "item_add" ? "➕" : a === "item_remove" ? "➖" : a === "item_update" ? "✏️" : "🔧";
+    box.innerHTML = `<div style="max-height:320px; overflow-y:auto;">` + data.map(r => `
+      <div style="display:flex; gap:10px; padding:7px 2px; border-bottom:1px solid var(--stroke); font-size:13.5px; align-items:baseline;">
+        <span style="flex:0 0 auto;">${icon(r.action)}</span>
+        <span style="flex:1; min-width:0;">${escapeHtml(r.note || r.action)}</span>
+        <span class="muted" style="flex:0 0 auto; font-size:12px; font-family:ui-monospace,Consolas,monospace;">${fmtDT(r.ts)}</span>
+      </div>`).join("") + `</div>`;
+  }
 
   document.getElementById("save-company-btn")?.addEventListener("click", async () => {
     const companyId = document.getElementById("company-select").value || null;
