@@ -3,95 +3,399 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>หน้าแรก - THE CORE</title>
-<link rel="stylesheet" href="shared/style.css">
+<title>THE CORE — ศูนย์บัญชาการ</title>
+<style>
+  :root{
+    --bg:#071020; --bg-2:#0a1830; --panel:#0e1c33; --stroke:rgba(80,200,255,.16); --stroke-2:rgba(80,200,255,.34);
+    --text:#dff3ff; --muted:#7fa3c4; --dim:#48688a;
+    --neon:#31d8ff; --neon-2:#0fa8d8; --cyan:#2fe0cf; --violet:#8b6dff; --amber:#ffb457; --green:#38e08a; --red:#ff6274;
+    --font-ui:"Noto Sans Thai","Leelawadee UI","Tahoma",system-ui,sans-serif;
+    --font-mono:ui-monospace,"Cascadia Code",Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;color:var(--text);font-family:var(--font-ui);font-size:14px;overflow-x:hidden;
+    background:
+      radial-gradient(900px 480px at 85% 10%, rgba(15,110,180,.25), transparent 60%),
+      radial-gradient(700px 420px at 10% 90%, rgba(20,90,160,.18), transparent 60%),
+      linear-gradient(160deg,#081428,#050c18)}
+  /* hex grid background */
+  body::before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.35;z-index:0;
+    background-image:url("data:image/svg+xml,%3Csvg width='56' height='64' viewBox='0 0 56 64' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M28 2 52 16v28L28 58 4 44V16z' fill='none' stroke='%231b3a5c' stroke-width='1'/%3E%3C/svg%3E");
+    background-size:56px 64px}
+  .wrap{position:relative;z-index:1;padding:14px 22px 30px;min-height:100vh;display:flex;flex-direction:column}
+  a{color:var(--neon);text-decoration:none}
+  .mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+  .muted{color:var(--muted)}
+
+  /* topbar */
+  .topbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:800;letter-spacing:.06em;font-size:16px}
+  .brand .mark{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;
+    background:linear-gradient(135deg,var(--neon),var(--violet));color:#03111c;box-shadow:0 0 24px rgba(49,216,255,.45)}
+  .brand small{display:block;font-weight:500;font-size:10.5px;color:var(--muted);letter-spacing:.12em}
+  .spacer{flex:1}
+  .navlink{padding:7px 13px;border-radius:10px;border:1px solid var(--stroke);background:rgba(10,30,55,.6);
+    color:var(--text);font-size:12.5px;white-space:nowrap;position:relative}
+  .navlink:hover{border-color:var(--neon);color:var(--neon)}
+  .navlink .nb{position:absolute;top:-7px;right:-7px;background:var(--red);color:#fff;border-radius:999px;
+    font-size:10px;font-weight:700;padding:1px 6px;box-shadow:0 0 10px rgba(255,98,116,.6)}
+
+  /* stat strip */
+  .stats{display:flex;gap:10px;flex-wrap:wrap;margin:6px 0 4px}
+  .stat{flex:1;min-width:150px;padding:10px 16px;border-radius:13px;cursor:pointer;
+    background:linear-gradient(180deg,rgba(18,42,72,.85),rgba(10,26,48,.85));border:1px solid var(--stroke);transition:.18s}
+  .stat:hover{border-color:var(--neon);transform:translateY(-2px)}
+  .stat .l{font-size:11px;color:var(--muted);letter-spacing:.08em}
+  .stat .v{font-family:var(--font-mono);font-size:22px;font-weight:700;margin-top:2px}
+  .stat.warn .v{color:var(--amber)} .stat.bad .v{color:var(--red)} .stat.ok .v{color:var(--green)} .stat.neon .v{color:var(--neon);text-shadow:0 0 16px rgba(49,216,255,.55)}
+
+  /* the neural stage */
+  .stage{position:relative;flex:1;min-height:520px}
+  .stage svg{width:100%;height:100%;min-height:520px;display:block}
+  .fnode{cursor:pointer}
+  .fnode rect{fill:rgba(9,26,48,.92);stroke:var(--stroke-2);stroke-width:1.2;transition:.2s}
+  .fnode:hover rect{stroke:var(--neon);filter:drop-shadow(0 0 10px rgba(49,216,255,.5))}
+  .fnode.sel rect{stroke:var(--neon);stroke-width:2;filter:drop-shadow(0 0 14px rgba(49,216,255,.65))}
+  .fnode .fn{fill:#e8f7ff;font-weight:700;font-size:14px}
+  .fnode .fd{fill:#31d8ff;font-size:10.5px;letter-spacing:.06em}
+  .fnode .fs{fill:#7fa3c4;font-size:11px;font-family:var(--font-mono)}
+  .fnode .fs .hot{fill:#ffb457}
+  .core-hit{cursor:pointer}
+
+  @keyframes heartbeat{0%,100%{transform:scale(1)}12%{transform:scale(1.035)}24%{transform:scale(1)}36%{transform:scale(1.02)}48%{transform:scale(1)}}
+  .brain-g{animation:heartbeat 2.8s ease-in-out infinite;transform-origin:var(--ox) var(--oy)}
+  @keyframes dashmove{to{stroke-dashoffset:-260}}
+  .gyri{stroke-dasharray:130 130;animation:dashmove 7s linear infinite}
+  .wave{stroke-dasharray:10 14;animation:dashmove 1.6s linear infinite}
+  @keyframes blink{0%,100%{opacity:.15}50%{opacity:.95}}
+  .bin{font-family:var(--font-mono);fill:#31d8ff;animation:blink 3s ease-in-out infinite}
+  @keyframes corePulse{0%,100%{opacity:.55}50%{opacity:1}}
+  .core-ring{animation:corePulse 2.8s ease-in-out infinite}
+  @media(prefers-reduced-motion:reduce){.brain-g,.gyri,.wave,.bin,.core-ring{animation:none}}
+
+  /* farm side panel */
+  .panel{position:fixed;top:70px;right:18px;width:340px;max-height:calc(100vh - 90px);overflow-y:auto;z-index:30;
+    background:linear-gradient(180deg,rgba(13,32,58,.97),rgba(8,20,38,.97));border:1px solid var(--stroke-2);
+    border-radius:16px;padding:16px 18px;box-shadow:0 8px 40px rgba(0,0,0,.5), 0 0 30px rgba(49,216,255,.12);
+    transform:translateX(380px);transition:transform .28s ease}
+  .panel.open{transform:none}
+  .panel h2{margin:0 0 2px;font-size:17px}
+  .panel .sub{font-size:11.5px;color:var(--neon);letter-spacing:.08em;margin-bottom:10px}
+  .pstats{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}
+  .pstat{background:rgba(8,22,40,.8);border:1px solid var(--stroke);border-radius:10px;padding:8px 10px}
+  .pstat .l{font-size:10.5px;color:var(--muted)} .pstat .v{font-family:var(--font-mono);font-size:18px;font-weight:700}
+  .mv{display:flex;gap:8px;align-items:baseline;padding:6px 0;border-bottom:1px solid var(--stroke);font-size:12.5px}
+  .mv .d{color:var(--dim);font-family:var(--font-mono);font-size:11px;flex:0 0 auto}
+  .pbtns{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+  .pbtn{flex:1;text-align:center;padding:8px 10px;border-radius:10px;border:1px solid var(--stroke-2);font-size:12.5px;white-space:nowrap}
+  .pbtn:hover{border-color:var(--neon)}
+  .pclose{position:absolute;top:10px;right:12px;background:none;border:none;color:var(--dim);font-size:16px;cursor:pointer}
+  .pclose:hover{color:var(--red)}
+
+  /* floating bills */
+  @keyframes floatOut{from{opacity:0;transform:translate(var(--fx0),var(--fy0)) scale(.3)}to{opacity:1;transform:translate(var(--fx),var(--fy)) scale(1)}}
+  @keyframes bob{0%,100%{margin-top:0}50%{margin-top:-7px}}
+  .bill-card{position:absolute;left:0;top:0;width:130px;z-index:25;cursor:pointer;animation:floatOut .55s cubic-bezier(.2,.9,.3,1.2) both;
+    transform:translate(var(--fx),var(--fy))}
+  .bill-card .inner{animation:bob 3.4s ease-in-out infinite;background:rgba(11,28,50,.95);border:1px solid var(--stroke-2);
+    border-radius:12px;padding:7px;box-shadow:0 6px 24px rgba(0,0,0,.5), 0 0 18px rgba(49,216,255,.18);transition:.18s}
+  .bill-card:hover .inner{border-color:var(--neon);box-shadow:0 0 26px rgba(49,216,255,.5)}
+  .bill-card img{width:100%;height:82px;object-fit:cover;border-radius:8px;background:#0a1626}
+  .bill-card .no-img{width:100%;height:82px;border-radius:8px;background:#0a1626;display:grid;place-items:center;font-size:26px}
+  .bill-card .dn{font-family:var(--font-mono);font-size:11px;font-weight:700;color:var(--neon);margin-top:5px;text-align:center}
+  .bill-card .stx{font-size:10px;text-align:center;color:var(--muted)}
+
+  .hint{position:absolute;left:50%;bottom:8px;transform:translateX(-50%);font-size:11.5px;color:var(--dim);white-space:nowrap}
+  @media(max-width:900px){.panel{width:calc(100vw - 30px);right:15px}}
+</style>
 </head>
 <body data-page="dashboard">
-<div class="layout">
-  <nav id="nav-root" class="sidebar no-print"></nav>
-  <main class="content">
-    <h1>สรุปภาพรวม</h1>
-    <p class="subtitle" id="welcome-line"></p>
+<div class="wrap">
+  <div class="topbar">
+    <div class="brand"><span class="mark">◆</span><span>THE&nbsp;CORE<small>NEURAL&nbsp;COMMAND&nbsp;CENTER · SJF</small></span></div>
+    <div class="spacer"></div>
+    <a class="navlink" href="stock.html">📦 คลังสินค้า</a>
+    <a class="navlink" id="nl-pr" href="purchase-request.html">🧾 ใบขอซื้อ</a>
+    <a class="navlink" href="scanner-ai.html">🪄 Scanner AI</a>
+    <a class="navlink" href="bill-archive.html">🗄️ คลังบิล</a>
+    <a class="navlink" href="jobs.html">🔧 งานช่าง</a>
+    <a class="navlink" href="vouchers.html">💸 ใบสำคัญ</a>
+    <a class="navlink" href="suppliers.html">🏪 ผู้ขาย</a>
+    <a class="navlink" href="settings.html">⚙️</a>
+  </div>
 
-    <div class="stat-grid">
-      <div class="stat-card"><div class="num" id="stat-items">-</div><div class="label">รายการสินค้าที่ดูแล</div></div>
-      <div class="stat-card"><div class="num" id="stat-low">-</div><div class="label">สินค้าใกล้หมด</div></div>
-      <div class="stat-card"><div class="num" id="stat-pending-pr">-</div><div class="label">ใบขอซื้อรอดำเนินการ</div></div>
-      <div class="stat-card"><div class="num" id="stat-pending-job">-</div><div class="label">ใบส่งงานช่างรอตรวจ</div></div>
-    </div>
+  <div class="stats">
+    <div class="stat neon" onclick="location.href='purchase-request.html'"><div class="l">รออนุมัติ / รอดำเนินการ</div><div class="v" id="st-pending">–</div></div>
+    <div class="stat ok" onclick="location.href='bill-archive.html'"><div class="l">มูลค่าซื้อเดือนนี้</div><div class="v" id="st-month">–</div></div>
+    <div class="stat bad" onclick="location.href='stock-low.html?domain=construction'"><div class="l">ของหมด (ก่อสร้าง ทุกฟาร์ม)</div><div class="v" id="st-out">–</div></div>
+    <div class="stat warn" onclick="location.href='stock.html'"><div class="l">เคลื่อนไหว 7 วัน (รับ/จ่าย)</div><div class="v" id="st-move">–</div></div>
+  </div>
 
-    <div class="card">
-      <h2>ใบขอซื้อล่าสุด</h2>
-      <table id="pr-table">
-        <tr><th>เลขที่</th><th>ฟาร์ม</th><th>หมวด</th><th>สถานะ</th><th></th></tr>
-        <tr><td colspan="5" class="muted">กำลังโหลด...</td></tr>
-      </table>
-    </div>
-
-    <div class="card">
-      <h2>ใบส่งงานช่างล่าสุด</h2>
-      <table id="job-table">
-        <tr><th>เลขที่</th><th>ฟาร์ม</th><th>ช่าง</th><th>สถานะ</th><th></th></tr>
-        <tr><td colspan="5" class="muted">กำลังโหลด...</td></tr>
-      </table>
-    </div>
-  </main>
+  <div class="stage" id="stage">
+    <svg id="neural" viewBox="0 0 1400 760" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="hint">💡 กดจุดฟาร์มเพื่อดูคลังก่อสร้าง · กดสมองตรงกลางเพื่อเรียกบิลใบขอซื้อล่าสุดลอยออกมา</div>
+  </div>
 </div>
+
+<div class="panel" id="farm-panel">
+  <button class="pclose" id="p-close">✕</button>
+  <h2 id="p-farm">—</h2>
+  <div class="sub">คลังก่อสร้าง · CONSTRUCTION STOCK</div>
+  <div class="pstats">
+    <div class="pstat"><div class="l">มีของในคลัง</div><div class="v" style="color:var(--green)" id="p-in">–</div></div>
+    <div class="pstat"><div class="l">ของหมด</div><div class="v" style="color:var(--red)" id="p-out">–</div></div>
+    <div class="pstat"><div class="l">รับเข้า 7 วัน</div><div class="v" id="p-recv">–</div></div>
+    <div class="pstat"><div class="l">เบิกออก 7 วัน</div><div class="v" id="p-iss">–</div></div>
+  </div>
+  <div style="font-size:12px;color:var(--muted);letter-spacing:.06em;margin:8px 0 2px">การเคลื่อนไหวล่าสุด</div>
+  <div id="p-moves"><span class="muted" style="font-size:12px">กำลังโหลด...</span></div>
+  <div class="pbtns">
+    <a class="pbtn" id="p-open" href="#">📦 เปิดคลัง</a>
+    <a class="pbtn" id="p-issue" href="#">🛒 เบิกของ</a>
+    <a class="pbtn" id="p-report" href="#">📊 รายงาน</a>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="shared/supabase-client.js"></script>
 <script src="shared/auth-guard.js"></script>
 <script>
+const NS = "http://www.w3.org/2000/svg";
+let FARMS = [], AGG = {}, MOVE7 = {}, CONITEMS = new Set();
+let billsOpen = false;
+
+/* ---------- data ---------- */
+async function loadData() {
+  const { data: farms } = await sb.from("farms").select("name").order("name");
+  FARMS = (farms || []).map(f => f.name);
+
+  // construction item ids
+  let from = 0;
+  while (true) {
+    const { data } = await sb.from("ops_items").select("id").eq("domain", "construction").eq("is_active", true).range(from, from + 999);
+    (data || []).forEach(r => CONITEMS.add(r.id));
+    if (!data || data.length < 1000) break;
+    from += 1000;
+  }
+  // balances (view มีเฉพาะ item ที่เคยมีการเคลื่อนไหว)
+  let bal = [], f2 = 0;
+  while (true) {
+    const { data } = await sb.from("ops_stock_balance").select("item_id, farm, balance").range(f2, f2 + 999);
+    bal = bal.concat(data || []);
+    if (!data || data.length < 1000) break;
+    f2 += 1000;
+  }
+  AGG = {};
+  for (const f of FARMS) AGG[f] = { has: 0, out: 0 };
+  for (const b of bal) {
+    if (!CONITEMS.has(b.item_id) || !AGG[b.farm]) continue;
+    if (Number(b.balance) > 0) AGG[b.farm].has++; else AGG[b.farm].out++;
+  }
+  // 7-day movement
+  const start = new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10);
+  let mv = [], f3 = 0;
+  while (true) {
+    const { data } = await sb.from("ops_stock_transactions").select("farm, item_id, txn_type, qty").gte("txn_date", start).range(f3, f3 + 999);
+    mv = mv.concat(data || []);
+    if (!data || data.length < 1000) break;
+    f3 += 1000;
+  }
+  MOVE7 = {}; let inAll = 0, outAll = 0;
+  for (const t of mv) {
+    if (!CONITEMS.has(t.item_id)) continue;
+    const m = MOVE7[t.farm] = MOVE7[t.farm] || { recv: 0, iss: 0 };
+    const q = Math.abs(Number(t.qty));
+    if (t.txn_type === "รับเข้า" || t.txn_type === "โอนเข้า") { m.recv += q; inAll += q; }
+    else if (t.txn_type === "เบิกจ่าย" || t.txn_type === "โอนออก") { m.iss += q; outAll += q; }
+  }
+  document.getElementById("st-out").textContent = FARMS.reduce((s, f) => s + AGG[f].out, 0);
+  document.getElementById("st-move").textContent = `${formatNumber(inAll, 0)} / ${formatNumber(outAll, 0)}`;
+
+  // pending PRs + month spend
+  const { count: pending } = await sb.from("ops_purchase_requests").select("id", { count: "exact", head: true }).in("status", ["รอเสมียนกลาง", "รออนุมัติเจ้าของ"]);
+  document.getElementById("st-pending").textContent = pending ?? 0;
+  if (pending) document.getElementById("nl-pr").insertAdjacentHTML("beforeend", `<span class="nb">${pending}</span>`);
+  const mStart = new Date().toISOString().slice(0, 7) + "-01";
+  const { data: mItems } = await sb.from("ops_purchase_request_items")
+    .select("qty, unit_price, ops_purchase_requests!inner(created_at, status)")
+    .gte("ops_purchase_requests.created_at", mStart).neq("ops_purchase_requests.status", "ยกเลิก").limit(2000);
+  const spend = (mItems || []).reduce((s, r) => s + r.qty * r.unit_price, 0);
+  document.getElementById("st-month").textContent = "฿" + formatNumber(spend);
+}
+
+/* ---------- neural stage ---------- */
+const CX = 700, CY = 390;
+function buildStage() {
+  const svg = document.getElementById("neural");
+  const slots = [   // ตำแหน่งรอบสมอง (ขวา 4 · ซ้าย 3 ตามภาพวงจร)
+    { x: 1120, y: 120 }, { x: 1215, y: 300 }, { x: 1215, y: 480 }, { x: 1120, y: 650 },
+    { x: 175, y: 130 }, { x: 95, y: 390 }, { x: 175, y: 645 },
+  ];
+  const defs = `
+    <defs>
+      <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+        <feGaussianBlur stdDeviation="5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+      <clipPath id="rightHalf"><rect x="${CX}" y="${CY - 190}" width="200" height="380"/></clipPath>
+      <linearGradient id="lineGrad" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0" stop-color="#31d8ff" stop-opacity=".9"/><stop offset="1" stop-color="#155a86" stop-opacity=".55"/>
+      </linearGradient>
+    </defs>`;
+
+  // ===== brain (มีชีวิต) =====
+  const brainOutline = `M ${CX} ${CY - 175}
+    C ${CX - 55} ${CY - 195}, ${CX - 125} ${CY - 165}, ${CX - 148} ${CY - 105}
+    C ${CX - 185} ${CY - 80}, ${CX - 190} ${CY - 15}, ${CX - 162} ${CY + 25}
+    C ${CX - 175} ${CY + 80}, ${CX - 135} ${CY + 130}, ${CX - 85} ${CY + 138}
+    C ${CX - 60} ${CY + 178}, ${CX - 15} ${CY + 185}, ${CX} ${CY + 168}
+    C ${CX + 15} ${CY + 185}, ${CX + 60} ${CY + 178}, ${CX + 85} ${CY + 138}
+    C ${CX + 135} ${CY + 130}, ${CX + 175} ${CY + 80}, ${CX + 162} ${CY + 25}
+    C ${CX + 190} ${CY - 15}, ${CX + 185} ${CY - 80}, ${CX + 148} ${CY - 105}
+    C ${CX + 125} ${CY - 165}, ${CX + 55} ${CY - 195}, ${CX} ${CY - 175} Z`;
+  const gyri = [
+    `M ${CX - 130} ${CY - 90} C ${CX - 80} ${CY - 130}, ${CX - 40} ${CY - 60}, ${CX - 95} ${CY - 40} C ${CX - 140} ${CY - 25}, ${CX - 105} ${CY + 15}, ${CX - 60} ${CY - 5}`,
+    `M ${CX - 140} ${CY + 35} C ${CX - 95} ${CY + 20}, ${CX - 85} ${CY + 75}, ${CX - 120} ${CY + 85} C ${CX - 90} ${CY + 110}, ${CX - 45} ${CY + 95}, ${CX - 50} ${CY + 60}`,
+    `M ${CX - 70} ${CY - 150} C ${CX - 30} ${CY - 120}, ${CX - 75} ${CY - 95}, ${CX - 25} ${CY - 80} C ${CX - 60} ${CY - 55}, ${CX - 20} ${CY - 35}, ${CX - 35} ${CY - 10}`,
+    `M ${CX - 40} ${CY + 30} C ${CX - 10} ${CY + 45}, ${CX - 45} ${CY + 90}, ${CX - 12} ${CY + 120} C ${CX - 35} ${CY + 140}, ${CX - 70} ${CY + 130}, ${CX - 72} ${CY + 105}`,
+  ].map(d => `<path class="gyri" d="${d}" fill="none" stroke="#31d8ff" stroke-width="2.4" stroke-linecap="round" opacity=".85"/>`).join("");
+  // binary right half
+  let bins = "";
+  for (let c = 0; c < 6; c++) {
+    for (let r = 0; r < 9; r++) {
+      const x = CX + 14 + c * 26 + (r % 2) * 6, y = CY - 140 + r * 34;
+      const s = Math.random() < .5 ? "10" : (Math.random() < .5 ? "011" : "01");
+      bins += `<text class="bin" x="${x}" y="${y}" font-size="${11 + Math.random() * 5}" style="animation-duration:${(2 + Math.random() * 3).toFixed(1)}s;animation-delay:${(Math.random() * 2).toFixed(1)}s">${s}</text>`;
+    }
+  }
+  // energy waves (ซ้ายเข้าสมอง)
+  const waves = [-95, -40, 20, 75].map((dy, i) =>
+    `<path class="wave" style="animation-duration:${1.3 + i * .25}s" d="M 285 ${CY + dy} C 380 ${CY + dy - 35}, 430 ${CY + dy + 30}, ${CX - 175} ${CY + dy * .45}" fill="none" stroke="#31d8ff" stroke-width="2.2" opacity=".65" filter="url(#glow)"/>`).join("");
+
+  // ===== farm nodes + circuits =====
+  let lines = "", nodes = "", dots = "";
+  FARMS.forEach((f, i) => {
+    const s = slots[i % slots.length];
+    const a = AGG[f] || { has: 0, out: 0 };
+    const right = s.x > CX;
+    const sx = right ? CX + 150 : CX - 150;
+    const sy = CY + (s.y - CY) * 0.28;
+    const ex = right ? s.x - 100 : s.x + 100;
+    const midx = (sx + ex) / 2;
+    const path = `M ${sx} ${sy} L ${midx} ${sy} L ${midx + (right ? 34 : -34)} ${s.y} L ${ex} ${s.y}`;
+    lines += `<path id="ln${i}" d="${path}" fill="none" stroke="url(#lineGrad)" stroke-width="1.8" opacity=".8"/>
+      <circle cx="${ex}" cy="${s.y}" r="4.5" fill="#31d8ff" filter="url(#glow)"/>`;
+    dots += `<circle r="4" fill="#7ff0ff" filter="url(#glow)"><animateMotion dur="${(2.2 + i * .5).toFixed(1)}s" repeatCount="indefinite" keyPoints="${right ? "0;1" : "1;0"}" keyTimes="0;1"><mpath href="#ln${i}"/></animateMotion></circle>`;
+    nodes += `<g class="fnode" data-farm="${escapeHtml(f)}" transform="translate(${s.x - 95}, ${s.y - 34})">
+      <rect width="190" height="68" rx="14"/>
+      <text class="fn" x="14" y="24">${escapeHtml(f)}</text>
+      <text class="fd" x="14" y="40">คลังก่อสร้าง · CONSTRUCTION</text>
+      <text class="fs" x="14" y="57">มีของ ${a.has} <tspan class="hot">· หมด ${a.out}</tspan></text>
+    </g>`;
+  });
+
+  svg.innerHTML = `${defs}
+    ${waves}
+    ${lines}
+    <g class="brain-g" style="--ox:${CX}px;--oy:${CY}px">
+      <path d="${brainOutline}" fill="rgba(18,50,86,.35)" stroke="#31d8ff" stroke-width="3" filter="url(#glow)"/>
+      ${gyri}
+      <g clip-path="url(#rightHalf)">${bins}</g>
+      <line x1="${CX}" y1="${CY - 172}" x2="${CX}" y2="${CY + 165}" stroke="#155a86" stroke-width="1.4" opacity=".7"/>
+      <circle class="core-ring" cx="${CX}" cy="${CY}" r="205" fill="none" stroke="#31d8ff" stroke-width="1" opacity=".35" stroke-dasharray="4 9"/>
+      <text x="${CX}" y="${CY + 232}" text-anchor="middle" fill="#7fa3c4" font-size="12.5" letter-spacing=".2em">THE CORE — กดสมองเพื่อเรียกบิลล่าสุด</text>
+    </g>
+    ${dots}
+    ${nodes}
+    <circle class="core-hit" cx="${CX}" cy="${CY}" r="195" fill="transparent"/>`;
+
+  svg.querySelectorAll(".fnode").forEach(n => n.addEventListener("click", () => openFarm(n.dataset.farm, n)));
+  svg.querySelector(".core-hit").addEventListener("click", () => toggleBills());
+}
+
+/* ---------- farm panel ---------- */
+async function openFarm(farm, nodeEl) {
+  document.querySelectorAll(".fnode").forEach(n => n.classList.remove("sel"));
+  if (nodeEl) nodeEl.classList.add("sel");
+  const p = document.getElementById("farm-panel");
+  p.classList.add("open");
+  const a = AGG[farm] || { has: 0, out: 0 };
+  const m = MOVE7[farm] || { recv: 0, iss: 0 };
+  document.getElementById("p-farm").textContent = farm;
+  document.getElementById("p-in").textContent = a.has;
+  document.getElementById("p-out").textContent = a.out;
+  document.getElementById("p-recv").textContent = "+" + formatNumber(m.recv, 0);
+  document.getElementById("p-iss").textContent = "−" + formatNumber(m.iss, 0);
+  const qs = `?farm=${encodeURIComponent(farm)}&domain=construction`;
+  document.getElementById("p-open").href = "stock-list.html" + qs;
+  document.getElementById("p-issue").href = "stock-issue.html" + qs;
+  document.getElementById("p-report").href = "stock-report.html" + qs;
+  const mvBox = document.getElementById("p-moves");
+  mvBox.innerHTML = '<span class="muted" style="font-size:12px">กำลังโหลด...</span>';
+  const { data: mv } = await sb.from("ops_stock_transactions")
+    .select("txn_date, txn_type, qty, ops_items!inner(name, domain)")
+    .eq("farm", farm).eq("ops_items.domain", "construction")
+    .order("id", { ascending: false }).limit(8);
+  if (!mv || !mv.length) { mvBox.innerHTML = '<span class="muted" style="font-size:12px">ยังไม่มีการเคลื่อนไหว</span>'; return; }
+  const col = t => (t === "รับเข้า" || t === "โอนเข้า") ? "var(--green)" : (t === "ปรับปรุงยอด" ? "var(--amber)" : "var(--red)");
+  mvBox.innerHTML = mv.map(t => `
+    <div class="mv"><span class="d">${t.txn_date.slice(5)}</span>
+      <span style="color:${col(t.txn_type)};flex:0 0 auto;font-size:11.5px">${escapeHtml(t.txn_type)}</span>
+      <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(t.ops_items?.name || "")}</span>
+      <span class="mono" style="flex:0 0 auto">${formatNumber(Math.abs(Number(t.qty)), 0)}</span></div>`).join("");
+}
+
+/* ---------- floating bills ---------- */
+async function toggleBills() {
+  const stage = document.getElementById("stage");
+  if (billsOpen) { stage.querySelectorAll(".bill-card").forEach(el => el.remove()); billsOpen = false; return; }
+  billsOpen = true;
+  const { data: prs } = await sb.from("ops_purchase_requests").select("id, doc_no, status, farm")
+    .neq("status", "ยกเลิก").order("id", { ascending: false }).limit(8);
+  if (!prs || !prs.length) return;
+  const ids = prs.map(p => p.id);
+  const { data: atts } = await sb.from("ops_attachments").select("entity_id, storage_path")
+    .eq("entity_type", "purchase_request").in("entity_id", ids);
+  const firstPath = {};
+  for (const at of (atts || [])) if (!firstPath[at.entity_id]) firstPath[at.entity_id] = at.storage_path;
+  const paths = Object.values(firstPath);
+  let urlByPath = {};
+  if (paths.length) {
+    const { data: signed } = await sb.storage.from("ops-attachments").createSignedUrls(paths, 600);
+    (signed || []).forEach(s => { if (s.signedUrl) urlByPath[s.path] = s.signedUrl; });
+  }
+  // จุดกึ่งกลาง stage เป็น px
+  const rect = stage.getBoundingClientRect();
+  const scale = Math.min(rect.width / 1400, rect.height / 760);
+  const cx = rect.width / 2, cy = (760 / 2) * scale + (rect.height - 760 * scale) / 2;
+  prs.forEach((p, i) => {
+    const ang = (i / prs.length) * Math.PI * 2 - Math.PI / 2;
+    const R = Math.min(rect.width, rect.height) * 0.34 + (i % 2) * 26;
+    const fx = cx + Math.cos(ang) * R - 65, fy = cy + Math.sin(ang) * R - 60;
+    const url = urlByPath[firstPath[p.id]];
+    const el = document.createElement("div");
+    el.className = "bill-card";
+    el.style.setProperty("--fx0", (cx - 65) + "px"); el.style.setProperty("--fy0", (cy - 60) + "px");
+    el.style.setProperty("--fx", fx + "px"); el.style.setProperty("--fy", fy + "px");
+    el.style.animationDelay = (i * 0.07) + "s";
+    el.innerHTML = `<div class="inner" style="animation-delay:${(i * .4)}s">
+      ${url ? `<img src="${url}">` : `<div class="no-img">🧾</div>`}
+      <div class="dn">${escapeHtml(p.doc_no || "#" + p.id)}</div>
+      <div class="stx">${escapeHtml(p.status)} · ${escapeHtml(p.farm)}</div></div>`;
+    el.addEventListener("click", () => location.href = "purchase-request.html?id=" + p.id);
+    stage.appendChild(el);
+  });
+}
+
 (async () => {
   const user = await requireAuth();
   if (!user) return;
-  document.getElementById("welcome-line").textContent = `ยินดีต้อนรับ ${user.name || user.email} · วันนี้คือ ${todayISO()}`;
-
-  const { count: itemCount } = await sb.from("ops_items").select("*", { count: "exact", head: true });
-  document.getElementById("stat-items").textContent = itemCount ?? 0;
-
-  const { count: prPending } = await sb.from("ops_purchase_requests").select("*", { count: "exact", head: true })
-    .in("status", ["รอเสมียนกลาง", "รออนุมัติเจ้าของ"]);
-  document.getElementById("stat-pending-pr").textContent = prPending ?? 0;
-
-  const { count: jobPending } = await sb.from("ops_job_submissions").select("*", { count: "exact", head: true })
-    .eq("status", "รอตรวจ");
-  document.getElementById("stat-pending-job").textContent = jobPending ?? 0;
-
-  document.getElementById("stat-low").textContent = "-";
-
-  const { data: prs } = await sb.from("ops_purchase_requests")
-    .select("id, doc_no, farm, domain, status")
-    .order("id", { ascending: false }).limit(5);
-  const prTable = document.getElementById("pr-table");
-  if (prs && prs.length) {
-    prTable.innerHTML = "<tr><th>เลขที่</th><th>ฟาร์ม</th><th>หมวด</th><th>สถานะ</th><th></th></tr>" +
-      prs.map(r => `<tr>
-        <td>${escapeHtml(r.doc_no || "#" + r.id)}</td>
-        <td>${escapeHtml(r.farm)}</td>
-        <td>${escapeHtml(DOMAIN_LABELS[r.domain] || r.domain)}</td>
-        <td><span class="badge ${STATUS_BADGE_CLASS[r.status] || ""}">${escapeHtml(r.status)}</span></td>
-        <td><a class="link" href="purchase-request.html?id=${r.id}">ดูรายละเอียด</a></td>
-      </tr>`).join("");
-  } else {
-    prTable.innerHTML = "<tr><th>เลขที่</th><th>ฟาร์ม</th><th>หมวด</th><th>สถานะ</th><th></th></tr><tr><td colspan='5' class='muted'>ยังไม่มีข้อมูล</td></tr>";
-  }
-
-  const { data: jobs } = await sb.from("ops_job_submissions")
-    .select("id, doc_no, farm, worker_name, status")
-    .order("id", { ascending: false }).limit(5);
-  const jobTable = document.getElementById("job-table");
-  if (jobs && jobs.length) {
-    jobTable.innerHTML = "<tr><th>เลขที่</th><th>ฟาร์ม</th><th>ช่าง</th><th>สถานะ</th><th></th></tr>" +
-      jobs.map(r => `<tr>
-        <td>${escapeHtml(r.doc_no || "#" + r.id)}</td>
-        <td>${escapeHtml(r.farm)}</td>
-        <td>${escapeHtml(r.worker_name)}</td>
-        <td><span class="badge ${STATUS_BADGE_CLASS[r.status] || ""}">${escapeHtml(r.status)}</span></td>
-        <td><a class="link" href="jobs.html?id=${r.id}">ดูรายละเอียด</a></td>
-      </tr>`).join("");
-  } else {
-    jobTable.innerHTML = "<tr><th>เลขที่</th><th>ฟาร์ม</th><th>ช่าง</th><th>สถานะ</th><th></th></tr><tr><td colspan='5' class='muted'>ยังไม่มีข้อมูล</td></tr>";
-  }
+  await loadData();
+  buildStage();
+  document.getElementById("p-close").addEventListener("click", () => {
+    document.getElementById("farm-panel").classList.remove("open");
+    document.querySelectorAll(".fnode").forEach(n => n.classList.remove("sel"));
+  });
 })();
 </script>
 </body>
