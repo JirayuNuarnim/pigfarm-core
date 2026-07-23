@@ -201,9 +201,11 @@
   <div class="prow">
     <div class="card"><h3>👁 ตัวอย่างเอกสาร <span class="live"><span class="d"></span>LIVE</span></h3><div class="body"><div id="doc-preview"></div></div></div>
     <div class="card"><h3>📑 ใบเสนอราคาที่แนบ</h3><div class="body"><div id="attached-docs"></div></div></div>
-    <div class="card ai"><span class="scan"></span><h3>⚡ AI เทียบราคา</h3><div class="body">
-      <div class="muted" style="font-size:13px;line-height:1.6">แนบใบเสนอราคาแล้วกด <b style="color:var(--cyan)">ส่งเข้าศูนย์กลาง</b> — ระบบจะให้ AI อ่านและเรียงเทียบราคาให้อัตโนมัติในหน้ารายละเอียด (ไฮไลต์ร้านถูกสุด)</div>
-      <div id="ai-hint" class="mono" style="margin-top:10px;font-size:12px;color:var(--dim)">แนบแล้ว 0 ใบ</div>
+    <div class="card ai"><span class="scan"></span><h3>⚡ AI อ่านเอกสาร → สร้างบิล</h3><div class="body">
+      <div class="muted" style="font-size:13px;line-height:1.6">แนบรูป <b style="color:var(--amber)">ใบเสนอราคา / บิลเงินสด / รายการเขียนมือ</b> ที่ช่อง ⚖️ แล้วกดปุ่มนี้ — AI จะอ่านรายการ+ราคา <b style="color:var(--cyan)">เติมลงบิลให้อัตโนมัติ</b> พร้อมจับคู่ผู้ขาย (ตรวจแก้ก่อนส่งเสมอ)</div>
+      <button class="btn" id="ai-read-btn" style="margin-top:10px;width:100%">🪄 อ่านเอกสารแล้วสร้างบิล</button>
+      <div id="ai-read-status" style="margin-top:8px;font-size:12.5px;line-height:1.5"></div>
+      <div id="ai-hint" class="mono" style="margin-top:6px;font-size:12px;color:var(--dim)">แนบแล้ว 0 ใบ</div>
     </div></div>
   </div>
 
@@ -511,6 +513,81 @@ function renderAttachedDocs() {
     updateSteps();
   });
   document.getElementById("attach-btn").addEventListener("click", () => document.getElementById("price-compare-files").click());
+
+  // ⚡ AI อ่านเอกสาร (ใบเสนอราคา/บิล/รายการเขียนมือ) → เติมบิล + จับคู่ผู้ขาย
+  document.getElementById("ai-read-btn").addEventListener("click", async () => {
+    const st = document.getElementById("ai-read-status");
+    const btn = document.getElementById("ai-read-btn");
+    const files = [...document.getElementById("price-compare-files").files];
+    if (!files.length) {
+      st.innerHTML = '<span style="color:var(--amber)">แนบรูปเอกสารที่ช่อง ⚖️ ก่อน แล้วกดอ่านอีกครั้ง</span>';
+      document.getElementById("price-compare-files").click();
+      return;
+    }
+    btn.disabled = true;
+    try {
+      // อัปโหลดขึ้นที่พักชั่วคราวให้ AI อ่าน (path ต้องเป็น ASCII)
+      st.textContent = "⏳ กำลังอัปโหลดรูป...";
+      const paths = [];
+      for (const f of files) {
+        const safe = f.name.replace(/[^a-zA-Z0-9._-]+/g, "_");
+        const path = `ai-inbox/${Date.now()}-${Math.random().toString(36).slice(2, 7)}-${safe}`;
+        const { error } = await sb.storage.from("ops-attachments").upload(path, f);
+        if (!error) paths.push(path);
+      }
+      if (!paths.length) { st.textContent = "อัปโหลดรูปไม่สำเร็จ"; return; }
+
+      st.textContent = "🤖 AI กำลังอ่านเอกสาร... (อาจใช้ 10-30 วินาที)";
+      const { data, error } = await sb.functions.invoke("read-quotation", { body: { paths } });
+      sb.storage.from("ops-attachments").remove(paths);  // ลบไฟล์พัก (รูปจริงจะแนบตอนบันทึกอยู่แล้ว)
+      if (error) {
+        let msg = error.message;
+        try { const j = await error.context.json(); if (j && j.error) msg = j.error; } catch (_) {}
+        st.innerHTML = '<span style="color:var(--red)">อ่านไม่สำเร็จ: ' + escapeHtml(msg) + "</span>";
+        return;
+      }
+
+      const results = (data && data.results) || [];
+      const domain = document.getElementById("manual-domain").value;
+      let added = 0, updated = 0, vendorName = null;
+      const errs = [];
+      for (const r of results) {
+        if (r.error) { errs.push(r.error); continue; }
+        if (!vendorName && r.vendor) vendorName = r.vendor;
+        for (const it of (r.items || [])) {
+          if (!it || !it.name) continue;
+          const size = (it.size || "").trim();
+          const ex = BILL.find(b => b.name === it.name && (b.size || "") === size);
+          if (ex) {
+            if (it.qty) ex.qty = Number(it.qty);
+            if (it.unit_price) ex.price = Number(it.unit_price);
+            updated++;
+          } else {
+            BILL.push({ item_id: null, name: String(it.name).trim(), unit: it.unit || "", domain,
+              qty: Number(it.qty) || 1, price: Number(it.unit_price) || 0, size });
+            added++;
+          }
+        }
+      }
+      renderBill();
+
+      // จับคู่ผู้ขายจากชื่อร้านในเอกสาร
+      let supMsg = "";
+      if (vendorName) {
+        const norm = (s) => (s || "").replace(/บริษัท|ห้างหุ้นส่วนจำกัด|หจก\.?|จำกัด|\(มหาชน\)|ร้าน|\s+/g, "").toLowerCase();
+        const found = SUPPLIERS.find(s => norm(s.name) && (norm(s.name).includes(norm(vendorName)) || norm(vendorName).includes(norm(s.name))));
+        if (found) { await selectSupplier(found.id); supMsg = `<br>🏪 เลือกผู้ขาย "<b>${escapeHtml(found.name)}</b>" ให้แล้ว`; }
+        else supMsg = `<br>🏪 ร้านในเอกสาร: "<b>${escapeHtml(vendorName)}</b>" — ไม่พบในระบบ เลือก/เพิ่มเองได้`;
+      }
+      if (added || updated) {
+        st.innerHTML = `<span style="color:var(--green)">✓ อ่านได้ ${added + updated} รายการ (ใหม่ ${added}${updated ? " / อัปเดต " + updated : ""})${supMsg}</span><br><span class="muted">ตรวจชื่อ/จำนวน/ราคาในบิลก่อนส่งเสมอ</span>`;
+      } else {
+        st.innerHTML = '<span style="color:var(--amber)">ไม่พบรายการสินค้าในเอกสาร' + (errs.length ? " — " + escapeHtml(errs[0]) : "") + "</span>";
+      }
+    } finally {
+      btn.disabled = false;
+    }
+  });
 
   document.getElementById("farm").addEventListener("change", renderPreview);
   document.getElementById("requested-by").addEventListener("input", renderPreview);
