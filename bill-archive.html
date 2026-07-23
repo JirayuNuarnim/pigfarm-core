@@ -48,13 +48,22 @@
   <nav id="nav-root" class="sidebar no-print"></nav>
   <main class="content">
     <div class="page-header">
-      <div><h1>คลังบิลและประวัติ</h1><p class="subtitle">คลังเก็บบิลที่ปิดแล้ว พร้อมรูปบิลและรายละเอียด — ค้นหา/กรอง/ดูย้อนหลังได้</p></div>
-      <div class="no-print" style="display:flex; gap:8px;">
+      <div><h1>คลังบิลและประวัติ</h1><p class="subtitle">คลังเอกสารทุกประเภท — บิลซื้อ ใบเบิก ใบโอน ใบตรวจนับ ใบส่งงานช่าง</p></div>
+      <div class="no-print" id="bills-actions" style="display:flex; gap:8px;">
         <button class="btn secondary" id="export-btn">📥 ส่งออก Excel (.csv)</button>
         <button class="btn secondary" id="print-btn">🖨️ พิมพ์ / บันทึก PDF</button>
       </div>
     </div>
 
+    <div class="no-print" id="doc-tabs" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px;">
+      <button class="btn" data-tab="bills">🧾 บิลซื้อ</button>
+      <button class="btn secondary" data-tab="issues">📤 ใบเบิกของ</button>
+      <button class="btn secondary" data-tab="transfers">🔄 ใบโอนข้ามฟาร์ม</button>
+      <button class="btn secondary" data-tab="counts">📋 ใบตรวจนับ</button>
+      <button class="btn secondary" data-tab="jobs">🔧 ใบส่งงานช่าง</button>
+    </div>
+
+    <div id="tab-bills">
     <div class="stat-grid" id="stats"></div>
 
     <div class="card">
@@ -89,6 +98,41 @@
         <thead><tr><th>เลขที่</th><th>วันที่</th><th>ฟาร์ม</th><th>บริษัท</th><th>ผู้ขาย</th><th class="text-right">มูลค่ารวม</th><th>จ่าย</th><th>รูปบิล</th><th></th></tr></thead>
         <tbody id="rows"><tr><td colspan="9" class="muted">กำลังโหลด...</td></tr></tbody>
       </table>
+    </div>
+    </div><!-- /tab-bills -->
+
+    <div id="tab-issues" style="display:none;">
+      <div class="card"><div class="filters">
+        <div class="field" style="flex:1; min-width:200px;"><label>ค้นหา (เลขที่/ฟาร์ม/ผู้เบิก)</label><input type="text" id="fi-search" placeholder="พิมพ์เพื่อค้นหา"></div>
+      </div></div>
+      <div class="card"><table>
+        <thead><tr><th>เลขที่</th><th>วันที่</th><th>ฟาร์ม</th><th>คลัง</th><th>ผู้เบิก</th><th class="text-right">รวมชิ้น</th><th>หมายเหตุ</th><th></th></tr></thead>
+        <tbody id="issue-rows"><tr><td colspan="8" class="muted">กำลังโหลด...</td></tr></tbody>
+      </table></div>
+    </div>
+
+    <div id="tab-transfers" style="display:none;">
+      <div class="card"><table>
+        <thead><tr><th>เลขที่</th><th>วันที่</th><th>จากฟาร์ม</th><th>ไปฟาร์ม</th><th class="text-right">จำนวนรายการ</th><th class="text-right">รวมชิ้น</th><th>หมายเหตุ</th></tr></thead>
+        <tbody id="transfer-rows"><tr><td colspan="7" class="muted">กำลังโหลด...</td></tr></tbody>
+      </table></div>
+    </div>
+
+    <div id="tab-counts" style="display:none;">
+      <div class="card"><table>
+        <thead><tr><th>เลขที่</th><th>วันที่</th><th>ฟาร์ม</th><th class="text-right">ปรับกี่รายการ</th><th class="text-right">ปรับเพิ่ม</th><th class="text-right">ปรับลด</th></tr></thead>
+        <tbody id="count-rows"><tr><td colspan="6" class="muted">กำลังโหลด...</td></tr></tbody>
+      </table></div>
+    </div>
+
+    <div id="tab-jobs" style="display:none;">
+      <div class="card"><div class="filters">
+        <div class="field" style="flex:1; min-width:200px;"><label>ค้นหา (เลขที่/ช่าง/ฟาร์ม)</label><input type="text" id="fj-search" placeholder="พิมพ์เพื่อค้นหา"></div>
+      </div></div>
+      <div class="card"><table>
+        <thead><tr><th>เลขที่</th><th>วันที่</th><th>ฟาร์ม</th><th>ประเภทงาน</th><th>ช่าง/ผู้รับงาน</th><th>สถานะ</th><th></th></tr></thead>
+        <tbody id="job-rows"><tr><td colspan="7" class="muted">กำลังโหลด...</td></tr></tbody>
+      </table></div>
     </div>
   </main>
 </div>
@@ -228,6 +272,120 @@ async function viewBillImages(id) {
   if (urls.length) openLightbox(urls, 0);
 }
 
+/* ===== หัวข้อเอกสารอื่นๆ (โหลดเมื่อกดแท็บครั้งแรก) ===== */
+const TAB_LOADED = {};
+let ISSUES = [], JOBS = [];
+
+function switchTab(tab) {
+  ["bills", "issues", "transfers", "counts", "jobs"].forEach(t => {
+    document.getElementById("tab-" + t).style.display = t === tab ? "" : "none";
+  });
+  document.querySelectorAll("#doc-tabs button").forEach(b => {
+    b.classList.toggle("secondary", b.dataset.tab !== tab);
+  });
+  document.getElementById("bills-actions").style.display = tab === "bills" ? "flex" : "none";
+  if (tab === "issues" && !TAB_LOADED.issues) { TAB_LOADED.issues = true; loadIssues(); }
+  if (tab === "transfers" && !TAB_LOADED.transfers) { TAB_LOADED.transfers = true; loadTransfers(); }
+  if (tab === "counts" && !TAB_LOADED.counts) { TAB_LOADED.counts = true; loadCounts(); }
+  if (tab === "jobs" && !TAB_LOADED.jobs) { TAB_LOADED.jobs = true; loadJobs(); }
+}
+
+async function loadIssues() {
+  const { data } = await sb.from("ops_stock_issues").select("*").order("id", { ascending: false }).limit(300);
+  ISSUES = data || [];
+  // รวมจำนวนชิ้นต่อใบจากรายการตัดสต็อก
+  const docNos = ISSUES.map(r => r.doc_no);
+  const qtyByDoc = {};
+  if (docNos.length) {
+    const { data: txns } = await sb.from("ops_stock_transactions").select("ref_no, qty").in("ref_no", docNos);
+    for (const t of (txns || [])) qtyByDoc[t.ref_no] = (qtyByDoc[t.ref_no] || 0) + Math.abs(Number(t.qty));
+  }
+  ISSUES.forEach(r => r.total_qty = qtyByDoc[r.doc_no] || 0);
+  renderIssues();
+}
+
+function renderIssues() {
+  const q = (document.getElementById("fi-search").value || "").trim();
+  const list = ISSUES.filter(r => !q || `${r.doc_no} ${r.farm} ${r.issued_to} ${r.issued_name || ""} ${r.note || ""}`.includes(q));
+  document.getElementById("issue-rows").innerHTML = list.length ? list.map(r => `
+    <tr>
+      <td><a class="link" href="stock-issues.html?id=${r.id}"><b>${escapeHtml(r.doc_no)}</b></a></td>
+      <td>${r.txn_date}</td>
+      <td>${escapeHtml(r.farm)}</td>
+      <td>${escapeHtml(DOMAIN_LABELS[r.domain] || r.domain)}</td>
+      <td>${escapeHtml(r.issued_to)}${r.issued_name ? " " + escapeHtml(r.issued_name) : ""}</td>
+      <td class="text-right">${formatNumber(r.total_qty, 0)}</td>
+      <td class="muted" style="font-size:13px;">${escapeHtml(r.note || "")}</td>
+      <td><a class="link" href="stock-issue-print.html?id=${r.id}" target="_blank">🖨️</a></td>
+    </tr>`).join("") : '<tr><td colspan="8" class="muted">ยังไม่มีใบเบิก</td></tr>';
+}
+
+async function loadTransfers() {
+  const { data } = await sb.from("ops_stock_transactions").select("ref_no, txn_date, farm, qty, note")
+    .eq("txn_type", "โอนออก").like("ref_no", "TF-%").order("id", { ascending: false }).limit(1000);
+  const docs = {};
+  for (const t of (data || [])) {
+    const d = docs[t.ref_no] = docs[t.ref_no] || { doc_no: t.ref_no, date: t.txn_date, from: t.farm, to: "", n: 0, qty: 0, note: "" };
+    d.n += 1; d.qty += Math.abs(Number(t.qty));
+    const m = (t.note || "").match(/^โอนไป (.+?)( — (.*))?$/);
+    if (m) { d.to = m[1]; if (m[3]) d.note = m[3]; }
+  }
+  const list = Object.values(docs);
+  document.getElementById("transfer-rows").innerHTML = list.length ? list.map(d => `
+    <tr>
+      <td><b>${escapeHtml(d.doc_no)}</b></td>
+      <td>${d.date}</td>
+      <td>${escapeHtml(d.from)}</td>
+      <td>${escapeHtml(d.to)}</td>
+      <td class="text-right">${d.n}</td>
+      <td class="text-right">${formatNumber(d.qty, 0)}</td>
+      <td class="muted" style="font-size:13px;">${escapeHtml(d.note)}</td>
+    </tr>`).join("") : '<tr><td colspan="7" class="muted">ยังไม่มีใบโอน</td></tr>';
+}
+
+async function loadCounts() {
+  const { data } = await sb.from("ops_stock_transactions").select("ref_no, txn_date, farm, qty")
+    .eq("txn_type", "ปรับปรุงยอด").like("ref_no", "CT-%").order("id", { ascending: false }).limit(1000);
+  const docs = {};
+  for (const t of (data || [])) {
+    const d = docs[t.ref_no] = docs[t.ref_no] || { doc_no: t.ref_no, date: t.txn_date, farm: t.farm, n: 0, plus: 0, minus: 0 };
+    d.n += 1;
+    const q = Number(t.qty);
+    if (q > 0) d.plus += q; else d.minus += -q;
+  }
+  const list = Object.values(docs);
+  document.getElementById("count-rows").innerHTML = list.length ? list.map(d => `
+    <tr>
+      <td><b>${escapeHtml(d.doc_no)}</b></td>
+      <td>${d.date}</td>
+      <td>${escapeHtml(d.farm)}</td>
+      <td class="text-right">${d.n}</td>
+      <td class="text-right" style="color:var(--green);">${d.plus ? "+" + formatNumber(d.plus, 0) : "-"}</td>
+      <td class="text-right" style="color:var(--red);">${d.minus ? "−" + formatNumber(d.minus, 0) : "-"}</td>
+    </tr>`).join("") : '<tr><td colspan="6" class="muted">ยังไม่มีใบตรวจนับ</td></tr>';
+}
+
+async function loadJobs() {
+  const { data } = await sb.from("ops_job_submissions").select("*").order("id", { ascending: false }).limit(300);
+  JOBS = data || [];
+  renderJobs();
+}
+
+function renderJobs() {
+  const q = (document.getElementById("fj-search").value || "").trim();
+  const list = JOBS.filter(r => !q || `${r.doc_no} ${r.farm} ${r.worker_name} ${r.job_type}`.includes(q));
+  document.getElementById("job-rows").innerHTML = list.length ? list.map(r => `
+    <tr>
+      <td><a class="link" href="jobs.html?id=${r.id}"><b>${escapeHtml(r.doc_no || "#" + r.id)}</b></a></td>
+      <td>${r.txn_date}</td>
+      <td>${escapeHtml(r.farm)}</td>
+      <td>${escapeHtml(r.job_type)}</td>
+      <td>${escapeHtml(r.worker_name)}</td>
+      <td><span class="badge ${r.status === "จ่ายแล้ว" ? "ok" : r.status === "อนุมัติแล้ว" ? "" : "warn"}">${escapeHtml(r.status)}</span></td>
+      <td><a class="link" href="jobs-print.html?id=${r.id}" target="_blank">🖨️</a></td>
+    </tr>`).join("") : '<tr><td colspan="7" class="muted">ยังไม่มีใบส่งงาน</td></tr>';
+}
+
 (async () => {
   const user = await requireAuth();
   if (!user) return;
@@ -242,6 +400,9 @@ async function viewBillImages(id) {
   ["f-paid", "f-from", "f-to", "f-search"].forEach(id => document.getElementById(id).addEventListener("input", render));
   document.getElementById("export-btn").addEventListener("click", exportCSV);
   document.getElementById("print-btn").addEventListener("click", () => window.print());
+  document.querySelectorAll("#doc-tabs button").forEach(b => b.addEventListener("click", () => switchTab(b.dataset.tab)));
+  document.getElementById("fi-search").addEventListener("input", renderIssues);
+  document.getElementById("fj-search").addEventListener("input", renderJobs);
   await loadData();
 })();
 </script>
