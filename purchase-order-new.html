@@ -662,6 +662,52 @@ function renderAttachedDocs() {
       st.innerHTML = `📋 สั่งซ้ำจาก <b>${escapeHtml(srcReq.doc_no || ("#" + fromId))}</b> — ตรวจรายการ/ราคา แล้ว <b>แนบใบเทียบราคาใหม่</b> ก่อนส่ง`;
     }
   }
+
+  // 🪄 prefill จากหน้า Scanner AI (?fromScan=1 + sessionStorage)
+  if (new URLSearchParams(location.search).get("fromScan")) {
+    try {
+      const pre = JSON.parse(sessionStorage.getItem("scannerPrefill") || "null");
+      if (pre && Array.isArray(pre.items) && pre.items.length) {
+        const domain = document.getElementById("manual-domain").value;
+        for (const it of pre.items) {
+          BILL.push({ item_id: null, name: String(it.name).trim(), unit: it.unit || "", domain,
+            qty: Number(it.qty) || 1, price: Number(it.unit_price) || 0, size: (it.size || "").trim() });
+        }
+        renderBill();
+        // จับคู่ผู้ขาย
+        let supNote = "";
+        if (pre.vendor) {
+          const norm = (s) => (s || "").replace(/บริษัท|ห้างหุ้นส่วนจำกัด|หจก\.?|จำกัด|\(มหาชน\)|ร้าน|\s+/g, "").toLowerCase();
+          const found = SUPPLIERS.find(s => norm(s.name) && (norm(s.name).includes(norm(pre.vendor)) || norm(pre.vendor).includes(norm(s.name))));
+          if (found) { await selectSupplier(found.id); supNote = ` · ผู้ขาย "${found.name}"`; }
+        }
+        // ดึงรูปที่สแกนมาแนบเป็นใบเทียบราคาให้เลย
+        let attached = 0;
+        if (Array.isArray(pre.paths) && pre.paths.length) {
+          const dt = new DataTransfer();
+          for (const p of pre.paths) {
+            try {
+              const { data: s } = await sb.storage.from("ops-attachments").createSignedUrl(p, 300);
+              if (!s?.signedUrl) continue;
+              const blob = await (await fetch(s.signedUrl)).blob();
+              dt.items.add(new File([blob], p.split("/").pop() || "scan.jpg", { type: blob.type || "image/jpeg" }));
+              attached++;
+            } catch (_) {}
+          }
+          if (attached) {
+            const inp = document.getElementById("price-compare-files");
+            inp.files = dt.files;
+            inp.dispatchEvent(new Event("change"));
+          }
+          sb.storage.from("ops-attachments").remove(pre.paths);  // ลบไฟล์พัก
+        }
+        const st = document.getElementById("save-status");
+        st.style.color = "var(--cyan)";
+        st.innerHTML = `🪄 เติมจาก Scanner AI แล้ว ${pre.items.length} รายการ${supNote}${attached ? ` · แนบรูปเอกสาร ${attached} ใบให้แล้ว` : ""} — ตรวจแก้ก่อนส่ง`;
+      }
+      sessionStorage.removeItem("scannerPrefill");
+    } catch (_) {}
+  }
 })();
 </script>
 </body>

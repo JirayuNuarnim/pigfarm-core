@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scanner AI - THE CORE</title>
+<link rel="stylesheet" href="shared/style.css">
+<style>
+  .scan-hero { position:relative; border:1px solid rgba(139,109,255,.35); border-radius:16px; overflow:hidden;
+    background: radial-gradient(130% 100% at 0% 0%, rgba(139,109,255,.16), transparent 55%), var(--panel); padding:22px 24px; margin-bottom:16px; }
+  .scan-hero .scanline { position:absolute; left:0; right:0; top:0; height:2px;
+    background:linear-gradient(90deg,transparent,var(--cyan),transparent); animation:scan 3.2s linear infinite; }
+  @keyframes scan { 0%{transform:translateY(0)} 100%{transform:translateY(150px)} }
+  @media(prefers-reduced-motion:reduce){ .scan-hero .scanline{animation:none} }
+  .drop { border:2px dashed rgba(139,109,255,.4); border-radius:14px; padding:26px; text-align:center; cursor:pointer; transition:.2s; }
+  .drop:hover, .drop.over { border-color:var(--cyan); background:rgba(47,224,207,.06); }
+  .thumbs { display:flex; gap:10px; flex-wrap:wrap; margin-top:14px; }
+  .thumbs .th { position:relative; }
+  .thumbs img { width:110px; height:110px; object-fit:cover; border-radius:10px; border:1px solid var(--stroke); }
+  .thumbs .rmx { position:absolute; top:-6px; right:-6px; width:22px; height:22px; border-radius:50%; border:none;
+    background:var(--red); color:#fff; cursor:pointer; font-size:12px; line-height:1; }
+  .res-card { border:1px solid var(--stroke); border-radius:14px; margin-top:14px; overflow:hidden; }
+  .res-head { padding:10px 16px; background:rgba(139,109,255,.1); display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .res-head .dt { font-size:12px; color:var(--violet); border:1px solid rgba(139,109,255,.4); border-radius:999px; padding:2px 10px; }
+  .res-body { padding:12px 16px; }
+  .res-body table input { width:100%; min-width:60px; background:var(--bg); border:1px solid var(--stroke); border-radius:7px; color:var(--text); padding:5px 7px; font-size:13px; }
+  .res-body table input.num { width:70px; text-align:right; font-family:ui-monospace,Consolas,monospace; }
+  .pulse-btn { box-shadow:0 0 22px rgba(47,224,207,.3); }
+</style>
+</head>
+<body data-page="scanner-ai">
+<div class="layout">
+  <nav id="nav-root" class="sidebar no-print"></nav>
+  <main class="content">
+    <div class="page-header">
+      <div><h1>🪄 Scanner AI</h1>
+      <p class="subtitle">ถ่ายรูปเอกสาร — ใบเสนอราคา / บิลเงินสด / ใบส่งของ / รายการเขียนมือ — AI อ่านให้เป็นรายการ แล้วสร้างใบขอซื้อได้ทันที</p></div>
+    </div>
+
+    <div class="scan-hero">
+      <span class="scanline"></span>
+      <div class="drop" id="drop">
+        <div style="font-size:34px;">📸</div>
+        <div style="font-weight:700; margin-top:6px;">กดเพื่อถ่ายรูป / เลือกรูปเอกสาร</div>
+        <div class="muted" style="font-size:13px; margin-top:4px;">เลือกได้หลายรูปพร้อมกัน (jpg / png) — หรือลากไฟล์มาวางตรงนี้</div>
+        <input type="file" id="files" accept="image/*" capture="environment" multiple style="display:none;">
+      </div>
+      <div class="thumbs" id="thumbs"></div>
+      <div style="display:flex; gap:12px; align-items:center; margin-top:16px; flex-wrap:wrap;">
+        <button class="btn pulse-btn" id="scan-btn">⚡ ให้ AI อ่านเอกสาร</button>
+        <span id="scan-status" class="muted" style="font-size:13.5px;"></span>
+      </div>
+    </div>
+
+    <div id="results"></div>
+
+    <div class="card" id="action-card" style="display:none; position:sticky; bottom:12px;">
+      <div style="display:flex; gap:14px; align-items:center; flex-wrap:wrap;">
+        <b><span id="total-items">0</span> รายการที่อ่านได้</b>
+        <span class="muted" style="font-size:13px;">ตรวจแก้ในตารางด้านบนได้เลย แล้วเลือกทำต่อ</span>
+        <button class="btn" id="to-po-btn" style="margin-left:auto;">📝 สร้างใบขอซื้อจากผลอ่าน</button>
+      </div>
+    </div>
+  </main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="shared/supabase-client.js"></script>
+<script src="shared/auth-guard.js"></script>
+<script>
+let FILES = [];    // File objects
+let RESULTS = [];  // per-doc {vendor, doc_type, items:[{name,size,qty,unit,unit_price}]}
+let PATHS = [];    // storage paths (kept for prefill into purchase order)
+
+function renderThumbs() {
+  const box = document.getElementById("thumbs");
+  box.innerHTML = FILES.map((f, i) => `
+    <div class="th"><img src="${URL.createObjectURL(f)}" title="${escapeHtml(f.name)}">
+    <button class="rmx" data-i="${i}">✕</button></div>`).join("");
+  box.querySelectorAll(".rmx").forEach(b => b.addEventListener("click", () => { FILES.splice(Number(b.dataset.i), 1); renderThumbs(); }));
+}
+
+function addFiles(list) {
+  for (const f of list) if (f.type.startsWith("image/")) FILES.push(f);
+  renderThumbs();
+}
+
+async function scan() {
+  const st = document.getElementById("scan-status");
+  const btn = document.getElementById("scan-btn");
+  if (!FILES.length) { st.textContent = "เลือกรูปเอกสารก่อนครับ"; document.getElementById("files").click(); return; }
+  btn.disabled = true;
+  try {
+    st.textContent = "⏳ กำลังอัปโหลดรูป...";
+    // ลบไฟล์พักรอบก่อน (ถ้ามี)
+    if (PATHS.length) { sb.storage.from("ops-attachments").remove(PATHS); PATHS = []; }
+    for (const f of FILES) {
+      const safe = f.name.replace(/[^a-zA-Z0-9._-]+/g, "_");
+      const path = `ai-inbox/${Date.now()}-${Math.random().toString(36).slice(2, 7)}-${safe}`;
+      const { error } = await sb.storage.from("ops-attachments").upload(path, f);
+      if (!error) PATHS.push(path);
+    }
+    if (!PATHS.length) { st.textContent = "อัปโหลดรูปไม่สำเร็จ"; return; }
+
+    st.textContent = "🤖 AI กำลังอ่านเอกสาร... (10-30 วินาทีต่อรูป)";
+    const { data, error } = await sb.functions.invoke("read-quotation", { body: { paths: PATHS } });
+    if (error) {
+      let msg = error.message;
+      try { const j = await error.context.json(); if (j && j.error) msg = j.error; } catch (_) {}
+      st.innerHTML = '<span style="color:var(--red)">อ่านไม่สำเร็จ: ' + escapeHtml(msg) + "</span>";
+      return;
+    }
+    RESULTS = (data && data.results) || [];
+    renderResults();
+    const n = countItems();
+    st.innerHTML = n ? `<span style="color:var(--green)">✓ อ่านเสร็จ — ได้ ${n} รายการ ตรวจแก้ด้านล่างได้เลย</span>`
+                     : '<span style="color:var(--amber)">อ่านเสร็จแต่ไม่พบรายการสินค้า — ลองถ่ายชัดขึ้น/ใกล้ขึ้น</span>';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function countItems() { return RESULTS.reduce((s, r) => s + ((r.items && r.items.length) || 0), 0); }
+
+function renderResults() {
+  const box = document.getElementById("results");
+  box.innerHTML = RESULTS.map((r, ri) => {
+    if (r.error) return `<div class="res-card"><div class="res-head">❌ <span class="muted" style="font-size:13px;">${escapeHtml(r.error)}</span></div></div>`;
+    return `<div class="res-card">
+      <div class="res-head">
+        <b>เอกสารที่ ${ri + 1}</b>
+        ${r.doc_type ? `<span class="dt">${escapeHtml(r.doc_type)}</span>` : ""}
+        ${r.vendor ? `<span style="font-size:13.5px;">🏪 ${escapeHtml(r.vendor)}</span>` : '<span class="muted" style="font-size:13px;">ไม่พบชื่อร้าน</span>'}
+      </div>
+      <div class="res-body">
+        <table>
+          <thead><tr><th>รายการ</th><th style="width:110px;">ขนาด</th><th style="width:80px;">จำนวน</th><th style="width:80px;">หน่วย</th><th style="width:90px;">ราคา/หน่วย</th><th style="width:36px;"></th></tr></thead>
+          <tbody>
+            ${(r.items || []).map((it, ii) => `<tr>
+              <td><input data-r="${ri}" data-i="${ii}" data-f="name" value="${escapeHtml(it.name || "")}"></td>
+              <td><input data-r="${ri}" data-i="${ii}" data-f="size" value="${escapeHtml(it.size || "")}"></td>
+              <td><input class="num" type="number" step="0.01" data-r="${ri}" data-i="${ii}" data-f="qty" value="${it.qty ?? 1}"></td>
+              <td><input data-r="${ri}" data-i="${ii}" data-f="unit" value="${escapeHtml(it.unit || "")}"></td>
+              <td><input class="num" type="number" step="0.01" data-r="${ri}" data-i="${ii}" data-f="unit_price" value="${it.unit_price ?? 0}"></td>
+              <td><button class="btn small danger rm-item" data-r="${ri}" data-i="${ii}">✕</button></td>
+            </tr>`).join("") || '<tr><td colspan="6" class="muted">ไม่พบรายการในเอกสารนี้</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+  }).join("");
+  box.querySelectorAll("input[data-f]").forEach(inp => inp.addEventListener("change", () => {
+    const it = RESULTS[Number(inp.dataset.r)].items[Number(inp.dataset.i)];
+    const f = inp.dataset.f;
+    it[f] = (f === "qty" || f === "unit_price") ? (parseFloat(inp.value) || 0) : inp.value;
+  }));
+  box.querySelectorAll(".rm-item").forEach(b => b.addEventListener("click", () => {
+    RESULTS[Number(b.dataset.r)].items.splice(Number(b.dataset.i), 1);
+    renderResults();
+  }));
+  const n = countItems();
+  document.getElementById("total-items").textContent = n;
+  document.getElementById("action-card").style.display = n ? "" : "none";
+}
+
+function toPurchaseOrder() {
+  const items = [];
+  let vendor = null;
+  for (const r of RESULTS) {
+    if (r.error) continue;
+    if (!vendor && r.vendor) vendor = r.vendor;
+    for (const it of (r.items || [])) if (it.name) items.push(it);
+  }
+  if (!items.length) return;
+  sessionStorage.setItem("scannerPrefill", JSON.stringify({ vendor, items, paths: PATHS }));
+  PATHS = [];  // ส่งต่อให้หน้าใบขอซื้อเป็นคนลบหลังดึงรูป
+  window.location.href = "purchase-order-new.html?fromScan=1";
+}
+
+(async () => {
+  const user = await requireAuth();
+  if (!user) return;
+  const drop = document.getElementById("drop");
+  const files = document.getElementById("files");
+  drop.addEventListener("click", () => files.click());
+  files.addEventListener("change", () => { addFiles(files.files); files.value = ""; });
+  drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
+  drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+  drop.addEventListener("drop", (e) => { e.preventDefault(); drop.classList.remove("over"); addFiles(e.dataTransfer.files); });
+  document.getElementById("scan-btn").addEventListener("click", () => scan());
+  document.getElementById("to-po-btn").addEventListener("click", () => toPurchaseOrder());
+})();
+</script>
+</body>
+</html>
