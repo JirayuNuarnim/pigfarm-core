@@ -212,6 +212,16 @@ function renderDomains(doms) {
 
 function renderFarms(farms) {
   const box = document.getElementById("farms");
+  // คลังก่อสร้าง: รวมวันครู1/2/3 เป็นวันครู1 (บวกยอดรวมกัน)
+  const merged = {};
+  const order = [];
+  for (const f of farms) {
+    const key = canonFarm(f.farm, "construction");
+    if (!merged[key]) { merged[key] = { farm: key, has: 0, out: 0, recv: 0, iss: 0 }; order.push(key); }
+    merged[key].has += f.has || 0; merged[key].out += f.out || 0;
+    merged[key].recv += f.recv || 0; merged[key].iss += f.iss || 0;
+  }
+  farms = order.map(k => merged[k]);
   if (!farms.length) { box.innerHTML = '<div class="skel">ไม่มีฟาร์มที่ดูแล</div>'; return; }
   box.innerHTML = farms.map(f => {
     const act = (f.recv || 0) + (f.iss || 0);

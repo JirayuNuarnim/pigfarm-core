@@ -54,6 +54,18 @@ function canSeeAllFarms() { return isOwner() || isCentral(); }
 function myFarms() { return CURRENT_USER ? (CURRENT_USER.farms || []) : []; }
 function myDomains() { return CURRENT_USER ? (CURRENT_USER.domains || []) : []; }
 
+// คลังก่อสร้างของ ฟาร์มวันครู1/2/3 รวมเป็นคลังเดียวชื่อ "ฟาร์มวันครู1" (บังคับที่ DB trigger ด้วย)
+const CONSTRUCTION_FARM_MERGE = { "ฟาร์มวันครู2": "ฟาร์มวันครู1", "ฟาร์มวันครู3": "ฟาร์มวันครู1" };
+// ชื่อฟาร์มที่ควรใช้จริงสำหรับโดเมนหนึ่งๆ
+function canonFarm(name, domain) { return domain === "construction" ? (CONSTRUCTION_FARM_MERGE[name] || name) : name; }
+// รายชื่อฟาร์มสำหรับ dropdown — ตัดฟาร์มที่ถูกรวม (เฉพาะคลังก่อสร้าง)
+function mergeFarmList(farms, domain) {
+  if (domain !== "construction") return (farms || []).slice();
+  const seen = new Set(), out = [];
+  for (const f of (farms || [])) { const c = CONSTRUCTION_FARM_MERGE[f] || f; if (!seen.has(c)) { seen.add(c); out.push(c); } }
+  return out;
+}
+
 function renderNav() {
   const el = document.getElementById("nav-root");
   if (!el || !CURRENT_USER) return;

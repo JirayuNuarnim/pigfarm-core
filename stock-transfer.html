@@ -74,14 +74,24 @@
 let CATALOG = [];
 let CART = [];
 
+let ALL_FARMS = [];
 async function loadFarms() {
   const { data } = await sb.from("farms").select("name").order("name");
-  const farms = (data || []).map(f => f.name);
-  document.getElementById("from-sel").innerHTML = farms.map(f => `<option>${escapeHtml(f)}</option>`).join("");
-  document.getElementById("to-sel").innerHTML = farms.map(f => `<option>${escapeHtml(f)}</option>`).join("");
-  if (farms.length > 1) document.getElementById("to-sel").selectedIndex = 1;
+  ALL_FARMS = (data || []).map(f => f.name);
   document.getElementById("domain-sel").innerHTML =
     Object.entries(DOMAIN_LABELS).map(([k, v]) => `<option value="${k}">${escapeHtml(v)}</option>`).join("");
+  refreshFarmOptions(true);
+}
+function refreshFarmOptions(initial) {
+  const domain = document.getElementById("domain-sel").value;
+  const farms = mergeFarmList(ALL_FARMS, domain);  // คลังก่อสร้าง: รวมวันครู1/2/3
+  for (const id of ["from-sel", "to-sel"]) {
+    const sel = document.getElementById(id);
+    const cur = sel.value;
+    sel.innerHTML = farms.map(f => `<option>${escapeHtml(f)}</option>`).join("");
+    if (farms.includes(cur)) sel.value = cur; else if (farms.includes(canonFarm(cur, domain))) sel.value = canonFarm(cur, domain);
+  }
+  if (initial && farms.length > 1) document.getElementById("to-sel").selectedIndex = 1;
 }
 
 async function loadCatalog() {
@@ -209,12 +219,12 @@ async function save() {
   if (!user) return;
   await loadFarms();
   const p = new URLSearchParams(location.search);
-  if (p.get("farm")) document.getElementById("from-sel").value = p.get("farm");
-  if (p.get("domain")) document.getElementById("domain-sel").value = p.get("domain");
+  if (p.get("domain")) { document.getElementById("domain-sel").value = p.get("domain"); refreshFarmOptions(); }
+  if (p.get("farm")) { const dv = document.getElementById("domain-sel").value; document.getElementById("from-sel").value = canonFarm(p.get("farm"), dv); }
   await loadCatalog();
   document.getElementById("q").addEventListener("input", () => renderCatalog());
   document.getElementById("from-sel").addEventListener("change", () => { CART = []; renderCart(); loadCatalog(); });
-  document.getElementById("domain-sel").addEventListener("change", () => { CART = []; renderCart(); loadCatalog(); });
+  document.getElementById("domain-sel").addEventListener("change", () => { refreshFarmOptions(); CART = []; renderCart(); loadCatalog(); });
   document.getElementById("save-btn").addEventListener("click", () => save());
 })();
 </script>

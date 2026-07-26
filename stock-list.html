@@ -110,6 +110,7 @@ async function loadFarmOptions() {
   } else {
     farms = myFarms();
   }
+  farms = mergeFarmList(farms, domain);   // คลังก่อสร้าง: รวมวันครู1/2/3 เป็นวันครู1
   sel.innerHTML = farms.map(f => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join("");
 }
 

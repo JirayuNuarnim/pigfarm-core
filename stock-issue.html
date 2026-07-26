@@ -208,16 +208,23 @@ let CATALOG = [];
 let CART = [];   // {item_id, name, code, unit, balance, qty}
 let WHO = "หมอ";
 
+let ALL_FARMS = [];
 async function loadFarms() {
-  const sel = document.getElementById("farm-sel");
-  let farms = [];
   if (canSeeAllFarms()) {
     const { data } = await sb.from("farms").select("name").order("name");
-    farms = (data || []).map(f => f.name);
-  } else farms = myFarms();
-  sel.innerHTML = farms.map(f => `<option>${escapeHtml(f)}</option>`).join("");
+    ALL_FARMS = (data || []).map(f => f.name);
+  } else ALL_FARMS = myFarms();
   document.getElementById("domain-sel").innerHTML =
     Object.entries(DOMAIN_LABELS).map(([k, v]) => `<option value="${k}">${escapeHtml(v)}</option>`).join("");
+  refreshFarmOptions();
+}
+function refreshFarmOptions() {
+  const sel = document.getElementById("farm-sel");
+  const domain = document.getElementById("domain-sel").value;
+  const cur = sel.value;
+  const farms = mergeFarmList(ALL_FARMS, domain);  // คลังก่อสร้าง: รวมวันครู1/2/3
+  sel.innerHTML = farms.map(f => `<option>${escapeHtml(f)}</option>`).join("");
+  if (farms.includes(cur)) sel.value = cur; else if (farms.includes(canonFarm(cur, domain))) sel.value = canonFarm(cur, domain);
 }
 
 async function loadCatalog() {
@@ -404,13 +411,13 @@ async function save() {
   if (!user) return;
   await loadFarms();
   const p = new URLSearchParams(location.search);
-  if (p.get("farm")) document.getElementById("farm-sel").value = p.get("farm");
-  if (p.get("domain")) document.getElementById("domain-sel").value = p.get("domain");
+  if (p.get("domain")) { document.getElementById("domain-sel").value = p.get("domain"); refreshFarmOptions(); }
+  if (p.get("farm")) { const dv = document.getElementById("domain-sel").value; document.getElementById("farm-sel").value = canonFarm(p.get("farm"), dv); }
   await loadCatalog();
   updateAll();
   document.getElementById("q").addEventListener("input", () => renderCatalog());
   document.getElementById("farm-sel").addEventListener("change", () => { CART = []; renderCart(); loadCatalog(); });
-  document.getElementById("domain-sel").addEventListener("change", () => { CART = []; renderCart(); loadCatalog(); });
+  document.getElementById("domain-sel").addEventListener("change", () => { refreshFarmOptions(); CART = []; renderCart(); loadCatalog(); });
   document.getElementById("who-name").addEventListener("input", () => updateAll());
   document.getElementById("note").addEventListener("input", () => updateAll());
   document.getElementById("photo").addEventListener("change", () => {
