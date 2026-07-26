@@ -84,8 +84,8 @@
 
   .cat-item{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 6px;border-bottom:1px solid var(--stroke);cursor:pointer;border-radius:8px;transition:.13s}
   .cat-item:hover{background:rgba(56,224,138,.08)}
-  .cat-item .nm{font-size:13px;font-weight:600}
-  .cat-item .code{font-family:var(--font-mono);font-size:10.5px;color:var(--dim)}
+  .cat-item .nm{font-size:15px;font-weight:700;line-height:1.35}
+  .cat-item .code{font-family:var(--font-mono);font-size:11px;color:var(--neon,#31d8ff)}
   .cat-item .bal{font-family:var(--font-mono);font-size:12.5px;color:var(--green);white-space:nowrap}
   .cat-item .bal.zero{color:var(--dim)}
 
@@ -106,13 +106,16 @@
   .who-chip.on{border-color:var(--green);background:rgba(56,224,138,.15);color:var(--green)}
 
   .addbox{position:relative}
-  .suggest{position:absolute;left:0;right:0;top:100%;z-index:30;margin-top:4px;background:var(--panel-2);border:1px solid var(--stroke-2);border-radius:11px;max-height:260px;overflow:auto;box-shadow:0 8px 28px rgba(0,0,0,.5);display:none}
+  .suggest{position:absolute;left:0;right:0;top:100%;z-index:30;margin-top:4px;background:var(--panel-2);border:1px solid var(--stroke-2);border-radius:11px;max-height:70vh;overflow:auto;box-shadow:0 8px 28px rgba(0,0,0,.5);display:none}
   .suggest.on{display:block}
-  .sg-item{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 12px;cursor:pointer;border-bottom:1px solid var(--stroke)}
+  .sg-item{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:11px 14px;cursor:pointer;border-bottom:1px solid var(--stroke)}
   .sg-item:last-child{border-bottom:none}
-  .sg-item.hi,.sg-item:hover{background:rgba(56,224,138,.12)}
-  .sg-item .nm{font-size:13.5px;font-weight:600} .sg-item .cd{font-family:var(--font-mono);font-size:10.5px;color:var(--dim)}
-  .sg-item .bal{font-family:var(--font-mono);font-size:12.5px;color:var(--green);white-space:nowrap} .sg-item .bal.zero{color:var(--dim)}
+  .sg-item.hi,.sg-item:hover{background:rgba(56,224,138,.14)}
+  .sg-item .info{flex:1;min-width:0}
+  .sg-item .nm{font-size:16px;font-weight:700;line-height:1.35;display:block}
+  .sg-item .cd{font-family:var(--font-mono);font-size:11.5px;color:var(--neon,#31d8ff)}
+  .sg-item .bal{font-family:var(--font-mono);font-size:14px;font-weight:700;color:var(--green);white-space:nowrap;flex:0 0 auto} .sg-item .bal.zero{color:var(--dim);font-weight:400}
+  .suggest .sg-more{padding:8px 14px;font-size:12px;color:var(--dim);text-align:center;border-top:1px solid var(--stroke)}
 
   .upload{border:1px solid rgba(255,180,87,.4);border-radius:12px;padding:12px;background:rgba(255,180,87,.06)}
   .upload input[type=file]{color:var(--muted);font-size:12px;margin-top:6px;max-width:100%}
@@ -290,25 +293,29 @@ function addItemToCart(itemId) {
 
 /* ===== ช่องพิมพ์เพิ่มรายการ (ต้องตรงกับสินค้าในคลังเท่านั้น) ===== */
 let SG_MATCHES = [], SG_HI = -1;
+let SG_TOTAL = 0;
 function suggestMatches(q) {
   const s = q.trim().toLowerCase();
-  if (!s) return [];
-  return CATALOG.filter(r => (r.name || "").toLowerCase().includes(s) || (r.code || "").toLowerCase().includes(s))
-    .sort((a, b) => (Number(b.balance) > 0) - (Number(a.balance) > 0)).slice(0, 12);
+  if (!s) { SG_TOTAL = 0; return []; }
+  const all = CATALOG.filter(r => (r.name || "").toLowerCase().includes(s) || (r.code || "").toLowerCase().includes(s))
+    .sort((a, b) => (Number(b.balance) > 0) - (Number(a.balance) > 0));
+  SG_TOTAL = all.length;
+  return all.slice(0, 40);
 }
 function renderSuggest() {
   const box = document.getElementById("add-suggest");
   if (!SG_MATCHES.length) { box.classList.remove("on"); box.innerHTML = ""; return; }
   box.innerHTML = SG_MATCHES.map((r, i) => `
     <div class="sg-item ${i === SG_HI ? "hi" : ""}" data-id="${r.item_id}">
-      <span><span class="nm">${escapeHtml(r.name)}</span> <span class="cd">${escapeHtml(r.code || "")}</span></span>
+      <span class="info"><span class="nm">${escapeHtml(r.name)}</span><span class="cd">${escapeHtml(r.code || "")}</span></span>
       <span class="bal ${Number(r.balance) > 0 ? "" : "zero"}">${formatNumber(r.balance, 0)} ${escapeHtml(r.unit || "")}</span>
-    </div>`).join("");
+    </div>`).join("") + (SG_TOTAL > SG_MATCHES.length ? `<div class="sg-more">พิมพ์เพิ่มเพื่อกรอง — แสดง ${SG_MATCHES.length} จาก ${SG_TOTAL} รายการ</div>` : "");
   box.classList.add("on");
   box.querySelectorAll(".sg-item").forEach(el => el.addEventListener("mousedown", (e) => {
     e.preventDefault();
     pickSuggest(Number(el.dataset.id));
   }));
+  if (SG_HI >= 0) box.querySelectorAll(".sg-item")[SG_HI]?.scrollIntoView({ block: "nearest" });
 }
 function pickSuggest(itemId) {
   addItemToCart(itemId);
