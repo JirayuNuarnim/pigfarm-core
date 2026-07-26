@@ -105,6 +105,15 @@
   .who-chip{display:inline-flex;align-items:center;gap:6px;padding:7px 16px;border-radius:999px;border:1px solid var(--stroke);background:var(--panel-2);cursor:pointer;font-size:13.5px;transition:.15s}
   .who-chip.on{border-color:var(--green);background:rgba(56,224,138,.15);color:var(--green)}
 
+  .addbox{position:relative}
+  .suggest{position:absolute;left:0;right:0;top:100%;z-index:30;margin-top:4px;background:var(--panel-2);border:1px solid var(--stroke-2);border-radius:11px;max-height:260px;overflow:auto;box-shadow:0 8px 28px rgba(0,0,0,.5);display:none}
+  .suggest.on{display:block}
+  .sg-item{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 12px;cursor:pointer;border-bottom:1px solid var(--stroke)}
+  .sg-item:last-child{border-bottom:none}
+  .sg-item.hi,.sg-item:hover{background:rgba(56,224,138,.12)}
+  .sg-item .nm{font-size:13.5px;font-weight:600} .sg-item .cd{font-family:var(--font-mono);font-size:10.5px;color:var(--dim)}
+  .sg-item .bal{font-family:var(--font-mono);font-size:12.5px;color:var(--green);white-space:nowrap} .sg-item .bal.zero{color:var(--dim)}
+
   .upload{border:1px solid rgba(255,180,87,.4);border-radius:12px;padding:12px;background:rgba(255,180,87,.06)}
   .upload input[type=file]{color:var(--muted);font-size:12px;margin-top:6px;max-width:100%}
   .photo-prev img{max-width:100%;max-height:170px;border-radius:10px;border:1px solid var(--stroke);margin-top:8px}
@@ -185,9 +194,14 @@
     </div></div>
 
     <div class="card"><h3>ใบเบิก · รายการที่จะเบิก</h3><div class="body">
-      <table class="bt">
+      <div class="addbox">
+        <input type="text" id="add-search" class="search" style="margin:0" placeholder="⌨️ พิมพ์ชื่อ/รหัสสินค้าเพื่อเพิ่ม แล้วกดเลือก (ต้องมีในคลัง)" autocomplete="off">
+        <div id="add-suggest" class="suggest"></div>
+        <div id="add-msg" style="font-size:12px;margin-top:4px"></div>
+      </div>
+      <table class="bt" style="margin-top:12px">
         <thead><tr><th class="l">รายการ</th><th>คงเหลือ</th><th>จำนวนเบิก</th><th></th></tr></thead>
-        <tbody id="cart-lines"><tr><td colspan="4" class="l dim" style="padding:14px 6px">ยังไม่มีรายการ — กดจากช่อง "ของในคลัง"</td></tr></tbody>
+        <tbody id="cart-lines"><tr><td colspan="4" class="l dim" style="padding:14px 6px">ยังไม่มีรายการ — พิมพ์ค้นหาด้านบน หรือกดจากช่อง "ของในคลัง"</td></tr></tbody>
       </table>
     </div></div>
   </div>
@@ -260,14 +274,66 @@ function renderCatalog() {
       <span><span class="nm">${escapeHtml(r.name)}</span><br><span class="code">${escapeHtml(r.code || "")}</span></span>
       <span class="bal ${Number(r.balance) > 0 ? "" : "zero"}">${formatNumber(r.balance, 0)} ${escapeHtml(r.unit || "")}</span>
     </div>`).join("") || '<p class="dim">ไม่พบสินค้า</p>';
-  document.querySelectorAll(".cat-item").forEach(el => el.addEventListener("click", () => {
-    const it = CATALOG.find(r => r.item_id === Number(el.dataset.id));
-    if (!it) return;
-    const ex = CART.find(c => c.item_id === it.item_id);
-    if (ex) ex.qty += 1;
-    else CART.push({ item_id: it.item_id, name: it.name, code: it.code, unit: it.unit, balance: Number(it.balance), qty: 1 });
-    renderCart();
+  document.querySelectorAll(".cat-item").forEach(el => el.addEventListener("click", () => addItemToCart(Number(el.dataset.id))));
+}
+
+// เพิ่มลงตะกร้า — รับเฉพาะ item ที่มีจริงในคลัง (CATALOG) เท่านั้น
+function addItemToCart(itemId) {
+  const it = CATALOG.find(r => r.item_id === Number(itemId));
+  if (!it) return false;
+  const ex = CART.find(c => c.item_id === it.item_id);
+  if (ex) ex.qty += 1;
+  else CART.push({ item_id: it.item_id, name: it.name, code: it.code, unit: it.unit, balance: Number(it.balance), qty: 1 });
+  renderCart();
+  return true;
+}
+
+/* ===== ช่องพิมพ์เพิ่มรายการ (ต้องตรงกับสินค้าในคลังเท่านั้น) ===== */
+let SG_MATCHES = [], SG_HI = -1;
+function suggestMatches(q) {
+  const s = q.trim().toLowerCase();
+  if (!s) return [];
+  return CATALOG.filter(r => (r.name || "").toLowerCase().includes(s) || (r.code || "").toLowerCase().includes(s))
+    .sort((a, b) => (Number(b.balance) > 0) - (Number(a.balance) > 0)).slice(0, 12);
+}
+function renderSuggest() {
+  const box = document.getElementById("add-suggest");
+  if (!SG_MATCHES.length) { box.classList.remove("on"); box.innerHTML = ""; return; }
+  box.innerHTML = SG_MATCHES.map((r, i) => `
+    <div class="sg-item ${i === SG_HI ? "hi" : ""}" data-id="${r.item_id}">
+      <span><span class="nm">${escapeHtml(r.name)}</span> <span class="cd">${escapeHtml(r.code || "")}</span></span>
+      <span class="bal ${Number(r.balance) > 0 ? "" : "zero"}">${formatNumber(r.balance, 0)} ${escapeHtml(r.unit || "")}</span>
+    </div>`).join("");
+  box.classList.add("on");
+  box.querySelectorAll(".sg-item").forEach(el => el.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    pickSuggest(Number(el.dataset.id));
   }));
+}
+function pickSuggest(itemId) {
+  addItemToCart(itemId);
+  const inp = document.getElementById("add-search");
+  inp.value = ""; SG_MATCHES = []; SG_HI = -1; renderSuggest();
+  const it = CATALOG.find(r => r.item_id === itemId);
+  document.getElementById("add-msg").innerHTML = `<span style="color:var(--green)">✓ เพิ่ม "${escapeHtml(it?.name || "")}" แล้ว</span>`;
+  inp.focus();
+}
+function onAddSearchInput() {
+  const inp = document.getElementById("add-search");
+  const msg = document.getElementById("add-msg");
+  const q = inp.value;
+  SG_MATCHES = suggestMatches(q); SG_HI = -1;
+  renderSuggest();
+  if (!q.trim()) { msg.innerHTML = ""; }
+  else if (!SG_MATCHES.length) { msg.innerHTML = `<span style="color:var(--red)">✕ ไม่พบ "${escapeHtml(q.trim())}" ในคลัง — เบิกไม่ได้ (ต้องเป็นสินค้าที่มีในคลังเท่านั้น)</span>`; }
+  else { msg.innerHTML = `<span class="dim">พบ ${SG_MATCHES.length} รายการ — กดเลือก หรือกด Enter เพื่อเพิ่มรายการแรก</span>`; }
+}
+function onAddSearchKey(e) {
+  if (!SG_MATCHES.length) return;
+  if (e.key === "ArrowDown") { e.preventDefault(); SG_HI = Math.min(SG_HI + 1, SG_MATCHES.length - 1); renderSuggest(); }
+  else if (e.key === "ArrowUp") { e.preventDefault(); SG_HI = Math.max(SG_HI - 1, 0); renderSuggest(); }
+  else if (e.key === "Enter") { e.preventDefault(); pickSuggest(SG_MATCHES[SG_HI >= 0 ? SG_HI : 0].item_id); }
+  else if (e.key === "Escape") { SG_MATCHES = []; renderSuggest(); }
 }
 
 function renderCart() {
@@ -421,7 +487,12 @@ async function save() {
   await loadCatalog();
   updateAll();
   document.getElementById("q").addEventListener("input", () => renderCatalog());
-  document.getElementById("farm-sel").addEventListener("change", () => { CART = []; renderCart(); loadCatalog(); });
+  const addInp = document.getElementById("add-search");
+  addInp.addEventListener("input", onAddSearchInput);
+  addInp.addEventListener("keydown", onAddSearchKey);
+  addInp.addEventListener("blur", () => setTimeout(() => document.getElementById("add-suggest").classList.remove("on"), 120));
+  addInp.addEventListener("focus", () => { if (SG_MATCHES.length) renderSuggest(); });
+  document.getElementById("farm-sel").addEventListener("change", () => { CART = []; renderCart(); loadCatalog(); document.getElementById("add-search").value = ""; document.getElementById("add-msg").innerHTML = ""; });
   document.getElementById("domain-sel").addEventListener("change", () => { refreshFarmOptions(); CART = []; renderCart(); loadCatalog(); });
   document.getElementById("who-name").addEventListener("input", () => updateAll());
   document.getElementById("note").addEventListener("input", () => updateAll());
