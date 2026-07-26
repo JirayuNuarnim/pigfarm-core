@@ -69,6 +69,8 @@
 <script src="shared/supabase-client.js"></script>
 <script src="shared/auth-guard.js"></script>
 <script>
+if (typeof mergeFarmList !== "function") window.mergeFarmList = (f) => (f || []).slice();
+if (typeof canonFarm !== "function") window.canonFarm = (n) => n;
 let ROWS = [];       // enriched overview rows
 let MOVED = new Set(); // item_ids ที่เคยมีการเคลื่อนไหวในฟาร์มนี้
 

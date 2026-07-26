@@ -204,6 +204,10 @@
 <script src="shared/supabase-client.js"></script>
 <script src="shared/auth-guard.js"></script>
 <script>
+// กันชน: ถ้าไฟล์ shared เวอร์ชันเก่ายังไม่มีฟังก์ชันรวมฟาร์ม ให้ทำงานต่อได้ (ไม่พังทั้งหน้า)
+if (typeof mergeFarmList !== "function") window.mergeFarmList = (f) => (f || []).slice();
+if (typeof canonFarm !== "function") window.canonFarm = (n) => n;
+
 let CATALOG = [];
 let CART = [];   // {item_id, name, code, unit, balance, qty}
 let WHO = "หมอ";
@@ -356,6 +360,7 @@ async function save() {
   const statusEl = document.getElementById("status");
   const farm = document.getElementById("farm-sel").value;
   const domain = document.getElementById("domain-sel").value;
+  if (!farm) { statusEl.textContent = "⚠ ยังไม่ได้เลือกฟาร์ม — ลองรีเฟรชหน้า (Ctrl+F5) แล้วเลือกฟาร์มใหม่"; return; }
   if (!CART.length) { statusEl.textContent = "ยังไม่มีรายการในใบเบิก"; return; }
   const over = CART.filter(c => c.qty > c.balance);
   if (over.length && !confirm(`มี ${over.length} รายการที่เบิกเกินยอดคงเหลือ ยืนยันบันทึก?`)) return;

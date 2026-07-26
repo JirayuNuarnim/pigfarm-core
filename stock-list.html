@@ -97,6 +97,8 @@
 <script src="shared/supabase-client.js"></script>
 <script src="shared/auth-guard.js"></script>
 <script>
+if (typeof mergeFarmList !== "function") window.mergeFarmList = (f) => (f || []).slice();
+if (typeof canonFarm !== "function") window.canonFarm = (n) => n;
 const params = new URLSearchParams(window.location.search);
 const domain = params.get("domain");
 const DOMAIN_NAME = DOMAIN_LABELS[domain] || domain;

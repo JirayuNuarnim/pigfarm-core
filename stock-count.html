@@ -60,6 +60,8 @@
 <script src="shared/supabase-client.js"></script>
 <script src="shared/auth-guard.js"></script>
 <script>
+if (typeof mergeFarmList !== "function") window.mergeFarmList = (f) => (f || []).slice();
+if (typeof canonFarm !== "function") window.canonFarm = (n) => n;
 let ALL = [];
 let COUNTS = {};   // item_id -> counted qty (only when user typed)
 
@@ -153,6 +155,7 @@ function updateSummary() {
 async function save() {
   const statusEl = document.getElementById("status");
   const farm = document.getElementById("farm-sel").value;
+  if (!farm) { statusEl.textContent = "⚠ ยังไม่ได้เลือกฟาร์ม — ลองรีเฟรชหน้า (Ctrl+F5)"; return; }
   const diffs = Object.entries(COUNTS).map(([id, v]) => {
     const r = ALL.find(x => x.item_id === Number(id));
     return r ? { r, counted: v, diff: v - Number(r.balance) } : null;

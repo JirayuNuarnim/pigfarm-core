@@ -60,6 +60,8 @@
 <script src="shared/supabase-client.js"></script>
 <script src="shared/auth-guard.js"></script>
 <script>
+if (typeof mergeFarmList !== "function") window.mergeFarmList = (f) => (f || []).slice();
+if (typeof canonFarm !== "function") window.canonFarm = (n) => n;
 let REPORT = [];   // computed rows for CSV
 const TH_MONTHS = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."];
 

@@ -71,6 +71,8 @@
 <script src="shared/supabase-client.js"></script>
 <script src="shared/auth-guard.js"></script>
 <script>
+if (typeof mergeFarmList !== "function") window.mergeFarmList = (f) => (f || []).slice();
+if (typeof canonFarm !== "function") window.canonFarm = (n) => n;
 let CATALOG = [];
 let CART = [];
 
@@ -166,6 +168,7 @@ async function save() {
   const statusEl = document.getElementById("status");
   const fromFarm = document.getElementById("from-sel").value;
   const toFarm = document.getElementById("to-sel").value;
+  if (!fromFarm || !toFarm) { statusEl.textContent = "⚠ ยังไม่ได้เลือกฟาร์ม — ลองรีเฟรชหน้า (Ctrl+F5)"; return; }
   if (fromFarm === toFarm) { statusEl.textContent = "ฟาร์มต้นทางกับปลายทางต้องไม่ซ้ำกัน"; return; }
   if (!CART.length) { statusEl.textContent = "ยังไม่มีรายการโอน"; return; }
   const over = CART.filter(c => c.qty > c.balance);
